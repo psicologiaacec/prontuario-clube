@@ -40,8 +40,11 @@
     <label>Categoria(s) envolvida(s)</label>
     <div class="cat-grid" id="catGrid">
       <label><input type="checkbox" value="Sub-9"> Sub-9</label>
+      <label><input type="checkbox" value="Sub-10"> Sub-10</label>
       <label><input type="checkbox" value="Sub-11"> Sub-11</label>
+      <label><input type="checkbox" value="Sub-12"> Sub-12</label>
       <label><input type="checkbox" value="Sub-13"> Sub-13</label>
+      <label><input type="checkbox" value="Sub-14"> Sub-14</label>
       <label><input type="checkbox" value="Sub-15"> Sub-15</label>
       <label><input type="checkbox" value="Sub-17"> Sub-17</label>
       <label><input type="checkbox" value="Sub-20"> Sub-20</label>
@@ -109,7 +112,7 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-const CATEGORIAS_PADRAO = ["Sub-9", "Sub-11", "Sub-13", "Sub-15", "Sub-17", "Sub-20"];
+const CATEGORIAS_PADRAO = ["Sub-9", "Sub-10", "Sub-11", "Sub-12", "Sub-13", "Sub-14", "Sub-15", "Sub-17", "Sub-20"];
 
 let usuarioAtual = null;
 let atividades = [];
