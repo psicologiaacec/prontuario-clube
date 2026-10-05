@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Atividades coletivas · Prontuário</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .cat-grid { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 6px 0 8px; }
+  .cat-grid label { display: flex; align-items: center; gap: 5px; margin: 0; font-size: 13px; font-weight: 400; }
+  .cat-grid input { width: auto; margin: 0; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="brand">Prontuário · Cuiabá EC</span>
+  <div>
+    <button onclick="window.location.href='atletas.html'" style="margin-right:8px;">Atletas</button>
+    <button onclick="window.location.href='atendimentos.html'" style="margin-right:8px;">Atendimentos</button>
+    <button onclick="window.location.href='atividades.html'" style="margin-right:8px;">Atividades coletivas</button>
+    <button onclick="window.location.href='admin-tipos.html'" style="margin-right:8px;">Tipos de registro</button>
+    <button onclick="window.location.href='importar-anamneses.html'" style="margin-right:8px;">Importar</button>
+    <button onclick="sair()">Sair</button>
+  </div>
+</div>
+
+<div class="container">
+
+  <div class="card">
+    <h2>Nova atividade coletiva</h2>
+    <p class="hint" style="margin-bottom:10px;">Palestras, psicoeducação, dinâmicas de grupo e outras atividades com a categoria. O registro fica visível aos dois profissionais.</p>
+
+    <label for="assinatura">Responsável (assinatura)</label>
+    <input type="text" id="assinatura" placeholder="Seu nome completo">
+
+    <label for="dataAtv">Data</label>
+    <input type="date" id="dataAtv">
+
+    <label>Categoria(s) envolvida(s)</label>
+    <div class="cat-grid" id="catGrid">
+      <label><input type="checkbox" value="Sub-9"> Sub-9</label>
+      <label><input type="checkbox" value="Sub-11"> Sub-11</label>
+      <label><input type="checkbox" value="Sub-13"> Sub-13</label>
+      <label><input type="checkbox" value="Sub-15"> Sub-15</label>
+      <label><input type="checkbox" value="Sub-17"> Sub-17</label>
+      <label><input type="checkbox" value="Sub-20"> Sub-20</label>
+    </div>
+    <input type="text" id="catOutra" placeholder="Outra categoria (opcional; separe por vírgula se forem várias)">
+
+    <label for="formato">Formato</label>
+    <select id="formato">
+      <option value="">Selecione...</option>
+      <option>Psicoeducação</option>
+      <option>Palestra</option>
+      <option>Dinâmica de grupo</option>
+      <option>Conversa em grupo</option>
+      <option>Treinamento / leitura</option>
+      <option>Observação de treino ou jogo</option>
+      <option>Outro</option>
+    </select>
+
+    <label for="tema">Tema / motivo</label>
+    <input type="text" id="tema" placeholder="Ex.: Estabelecimento de metas">
+
+    <label for="obs">Observações</label>
+    <textarea id="obs" style="min-height:90px;"></textarea>
+
+    <label for="enc">Encaminhamentos / próximos passos (opcional)</label>
+    <textarea id="enc" style="min-height:60px;"></textarea>
+
+    <label for="part">Nº de participantes (opcional)</label>
+    <input type="number" id="part" min="0" style="max-width:140px;">
+
+    <button class="btn btn-gold" style="margin-top:14px;" onclick="salvarAtividade()">Salvar atividade coletiva</button>
+    <p id="erro" class="error-msg" style="display:none;"></p>
+    <p id="ok" style="color:#3B6D11; font-size:13px; margin-top:6px; display:none;"></p>
+  </div>
+
+  <div class="card">
+    <h2>Atividades registradas</h2>
+    <p class="hint" style="margin-bottom:10px;">Para ver por data, junto com os atendimentos individuais, use o calendário na tela de <a href="atendimentos.html" style="color:#304E38; font-weight:600;">Atendimentos</a>.</p>
+
+    <div class="subtab-bar">
+      <button class="subtab-btn active" data-f="todos" onclick="escolherFiltroAutor('todos')">Todas</button>
+      <button class="subtab-btn" data-f="meus" onclick="escolherFiltroAutor('meus')">Só as minhas</button>
+      <button class="subtab-btn" data-f="colega" onclick="escolherFiltroAutor('colega')">Só do colega</button>
+    </div>
+
+    <label for="filtroCategoria">Categoria</label>
+    <select id="filtroCategoria" onchange="filtrarCategoria()">
+      <option value="">Todas as categorias</option>
+    </select>
+
+
+    <p id="resultadoTitulo" class="hint" style="margin-top:14px;"></p>
+    <div id="resultadoLista"></div>
+  </div>
+
+</div>
+
+<script type="module">
+import { firebaseConfig } from "./firebase-config.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, collection, doc, setDoc, deleteDoc, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+const CATEGORIAS_PADRAO = ["Sub-9", "Sub-11", "Sub-13", "Sub-15", "Sub-17", "Sub-20"];
+
+let usuarioAtual = null;
+let atividades = [];
+let filtroAutor = "todos";
+let filtroCat = "";
+
+onAuthStateChanged(auth, async (user) => {
+  if (!user) { window.location.href = "index.html"; return; }
+  usuarioAtual = user;
+  await carregarAtividades();
+});
+
+window.sair = function () { signOut(auth).then(() => window.location.href = "index.html"); };
+
+async function carregarAtividades() {
+  try {
+    const snap = await getDocs(query(collection(db, "atividades_coletivas"), orderBy("data", "desc")));
+    atividades = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    console.warn(err);
+    atividades = [];
+    const t = document.getElementById("resultadoTitulo");
+    t.textContent = "Não foi possível carregar as atividades. Confira se as regras do Firestore foram atualizadas para a coleção atividades_coletivas.";
+  }
+  montarFiltroCategoria();
+  renderResultado();
+}
+
+function montarFiltroCategoria() {
+  const sel = document.getElementById("filtroCategoria");
+  const atual = sel.value;
+  const todas = new Set(CATEGORIAS_PADRAO);
+  atividades.forEach(a => (a.categorias || []).forEach(c => todas.add(c)));
+  sel.innerHTML = '<option value="">Todas as categorias</option>' +
+    [...todas].map(c => `<option value="${escAttr(c)}">${esc(c)}</option>`).join("");
+  sel.value = [...todas].includes(atual) ? atual : "";
+  filtroCat = sel.value;
+}
+
+window.filtrarCategoria = function () {
+  filtroCat = document.getElementById("filtroCategoria").value;
+  renderResultado();
+};
+
+window.escolherFiltroAutor = function (f) {
+  filtroAutor = f;
+  document.querySelectorAll("[data-f]").forEach(b => b.classList.toggle("active", b.dataset.f === f));
+  renderResultado();
+};
+
+function passaFiltros(a) {
+  if (filtroAutor === "meus" && a.autorUid !== usuarioAtual.uid) return false;
+  if (filtroAutor === "colega" && a.autorUid === usuarioAtual.uid) return false;
+  if (filtroCat && !(a.categorias || []).includes(filtroCat)) return false;
+  return true;
+}
+
+function renderResultado() {
+  const tituloEl = document.getElementById("resultadoTitulo");
+  const listaEl = document.getElementById("resultadoLista");
+  listaEl.innerHTML = "";
+  const lista = atividades.filter(passaFiltros);
+  tituloEl.textContent = lista.length === 0
+    ? "Nenhuma atividade coletiva registrada ainda."
+    : `${lista.length} atividade(s) coletiva(s), da mais recente para a mais antiga.`;
+  lista.forEach(c => listaEl.appendChild(criarLinha(c)));
+}
+
+function criarLinha(c) {
+  const row = document.createElement("div");
+  row.className = "entry";
+  const [y, m, d] = (c.data || "").split("-");
+  const dataFmt = y ? `${d}/${m}/${y}` : "";
+  const cats = (c.categorias || []).map(x => `<span class="pill pill-outline" style="margin-right:4px;">${esc(x)}</span>`).join("");
+  const formatoHtml = c.formato ? `<span class="pill pill-outline" style="margin-right:4px;">${esc(c.formato)}</span>` : "";
+  const partHtml = c.participantes ? `<span class="hint"> · ${esc(c.participantes)} participante(s)</span>` : "";
+  const podeExcluir = c.autorUid === usuarioAtual.uid;
+  const excluirBtn = podeExcluir ? `<button class="btn btn-outline" style="font-size:11px; padding:3px 8px; margin-left:8px;" data-excluir="${escAttr(c.id)}">Excluir</button>` : "";
+  const encHtml = c.encaminhamentos
+    ? `<div style="font-size:13px; color:#304E38; margin-top:6px;"><strong>Próximos passos:</strong> ${esc(c.encaminhamentos)}</div>` : "";
+
+  row.innerHTML = `
+    <div class="meta">
+      <strong style="color:#304E38;">${esc(c.tema)}</strong>
+      · ${dataFmt} · ${esc(c.assinatura)}
+      ${excluirBtn}
+    </div>
+    <div style="margin-top:6px;">${cats}${formatoHtml}${partHtml}</div>
+    <div style="font-size:13px; color:#304E38; background:#FCFBF7; border-radius:8px; padding:8px 10px; margin-top:8px; white-space:pre-wrap;">${esc(c.observacoes)}</div>
+    ${encHtml}
+  `;
+  if (podeExcluir) {
+    row.querySelector("[data-excluir]").addEventListener("click", async () => {
+      if (!confirm("Excluir esta atividade coletiva? Essa ação não pode ser desfeita.")) return;
+      await deleteDoc(doc(db, "atividades_coletivas", c.id));
+      await carregarAtividades();
+    });
+  }
+  return row;
+}
+
+window.salvarAtividade = async function () {
+  const erroEl = document.getElementById("erro");
+  const okEl = document.getElementById("ok");
+  erroEl.style.display = "none";
+  okEl.style.display = "none";
+
+  const assinatura = document.getElementById("assinatura").value.trim();
+  const data = document.getElementById("dataAtv").value;
+  const tema = document.getElementById("tema").value.trim();
+  const observacoes = document.getElementById("obs").value.trim();
+  const encaminhamentos = document.getElementById("enc").value.trim();
+  const formato = document.getElementById("formato").value;
+  const participantes = document.getElementById("part").value;
+
+  const categorias = [...document.querySelectorAll("#catGrid input:checked")].map(i => i.value);
+  document.getElementById("catOutra").value.split(",").map(x => x.trim()).filter(Boolean).forEach(x => categorias.push(x));
+
+  if (!assinatura || !data || !tema || !observacoes || categorias.length === 0) {
+    erroEl.textContent = "Preencha responsável, data, ao menos uma categoria, tema e observações antes de salvar.";
+    erroEl.style.display = "block";
+    return;
+  }
+
+  try {
+    const id = doc(collection(db, "atividades_coletivas")).id;
+    await setDoc(doc(db, "atividades_coletivas", id), {
+      data, categorias, formato, tema, observacoes, encaminhamentos,
+      participantes: participantes ? Number(participantes) : null,
+      assinatura,
+      autorUid: usuarioAtual.uid,
+      criadoEm: new Date().toISOString()
+    });
+  } catch (err) {
+    erroEl.textContent = "Não foi possível salvar. Confira se as regras do Firestore foram atualizadas para a coleção atividades_coletivas.";
+    erroEl.style.display = "block";
+    return;
+  }
+
+  okEl.textContent = "Atividade coletiva salva.";
+  okEl.style.display = "block";
+  ["dataAtv", "tema", "obs", "enc", "part", "catOutra"].forEach(i => document.getElementById(i).value = "");
+  document.getElementById("formato").value = "";
+  document.querySelectorAll("#catGrid input").forEach(i => i.checked = false);
+  await carregarAtividades();
+};
+
+function esc(str) {
+  return String(str ?? "").replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+}
+function escAttr(str) { return esc(str); }
+</script>
+
+</body>
+</html>
