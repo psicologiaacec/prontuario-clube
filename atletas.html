@@ -116,7 +116,7 @@ function renderizarPastas() {
     const aberta = pastaAberta === ano;
     wrap.innerHTML = `
       <button class="pastaBtn ${aberta ? 'aberta' : ''}" data-ano="${escapeHtml(ano)}">
-        <span>📁 ${escapeHtml(ano)}${grupo[0].categoria ? " · " + escapeHtml(grupo[0].categoria) : ""}</span>
+        <span>📁 ${escapeHtml(ano)}</span>
         <span>${grupo.length} atleta(s)</span>
       </button>
     `;
@@ -137,14 +137,14 @@ function renderizarPastas() {
   });
 }
 
-function criarLinhaAtleta(a) {
+function criarLinhaAtleta(a, mostrarAno = false) {
   const row = document.createElement("a");
   row.className = "list-row";
   row.href = `atleta.html?id=${a.id}`;
   const semAnamnese = !atletasComAnamnese.has(a.id);
   row.innerHTML = `
     <span>${escapeHtml(a.nome)}${semAnamnese ? '<span class="aviso-pill">sem anamnese</span>' : ''}</span>
-    <span class="pill">${escapeHtml(a.categoria || a.ano || "—")}</span>
+    <span class="pill">${mostrarAno ? escapeHtml(a.ano || "—") + " · " : ""}${escapeHtml(a.categoria || "sem categoria")}</span>
   `;
   return row;
 }
@@ -159,7 +159,7 @@ window.filtrar = function () {
     el.innerHTML = `<p class="hint">Nenhum atleta encontrado.</p>`;
     return;
   }
-  filtrados.forEach(a => el.appendChild(criarLinhaAtleta(a)));
+  filtrados.forEach(a => el.appendChild(criarLinhaAtleta(a, true)));
 };
 
 window.cadastrarAtleta = function () {
