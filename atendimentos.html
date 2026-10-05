@@ -5,6 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Atendimentos · Prontuário</title>
 <link rel="stylesheet" href="style.css">
+<style>
+  .cal-day.has-col { position: relative; }
+  .cal-day.has-col::before {
+    content: ""; position: absolute; bottom: 4px; width: 4px; height: 4px;
+    border-radius: 50%; background: #304E38;
+  }
+  .cal-day.has-dot.has-col::after { transform: translateX(-4px); }
+  .cal-day.has-dot.has-col::before { transform: translateX(4px); }
+  .cat-grid { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 6px 0 8px; }
+  .cat-grid label { display: flex; align-items: center; gap: 5px; margin: 0; font-size: 13px; font-weight: 400; }
+  .cat-grid input { width: auto; margin: 0; }
+  .legenda-cal { font-size: 12px; color: #8C8A80; margin-bottom: 8px; }
+  .legenda-cal .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin: 0 4px 0 10px; }
+</style>
 </head>
 <body>
 
@@ -60,7 +74,57 @@
   </div>
 
   <div class="card">
-    <h2>Consultar atendimentos</h2>
+    <h2>Nova atividade coletiva</h2>
+    <p class="hint" style="margin-bottom:10px;">Palestras, psicoeducação, dinâmicas de grupo e outras atividades com a categoria. Fica visível aos dois profissionais e aparece no calendário abaixo.</p>
+
+    <label for="assinaturaColetiva">Responsável (assinatura)</label>
+    <input type="text" id="assinaturaColetiva" placeholder="Seu nome completo">
+
+    <label for="dataColetiva">Data</label>
+    <input type="date" id="dataColetiva">
+
+    <label>Categoria(s) envolvida(s)</label>
+    <div class="cat-grid" id="catColetiva">
+      <label><input type="checkbox" value="Sub-9"> Sub-9</label>
+      <label><input type="checkbox" value="Sub-11"> Sub-11</label>
+      <label><input type="checkbox" value="Sub-13"> Sub-13</label>
+      <label><input type="checkbox" value="Sub-15"> Sub-15</label>
+      <label><input type="checkbox" value="Sub-17"> Sub-17</label>
+      <label><input type="checkbox" value="Sub-20"> Sub-20</label>
+    </div>
+    <input type="text" id="catOutra" placeholder="Outra categoria (opcional; separe por vírgula se forem várias)">
+
+    <label for="formatoColetiva">Formato</label>
+    <select id="formatoColetiva">
+      <option value="">Selecione...</option>
+      <option>Psicoeducação</option>
+      <option>Palestra</option>
+      <option>Dinâmica de grupo</option>
+      <option>Conversa em grupo</option>
+      <option>Treinamento / leitura</option>
+      <option>Observação de treino ou jogo</option>
+      <option>Outro</option>
+    </select>
+
+    <label for="temaColetiva">Tema / motivo</label>
+    <input type="text" id="temaColetiva" placeholder="Ex.: Estabelecimento de metas">
+
+    <label for="obsColetiva">Observações</label>
+    <textarea id="obsColetiva" style="min-height:90px;"></textarea>
+
+    <label for="encColetiva">Encaminhamentos / próximos passos (opcional)</label>
+    <textarea id="encColetiva" style="min-height:60px;"></textarea>
+
+    <label for="partColetiva">Nº de participantes (opcional)</label>
+    <input type="number" id="partColetiva" min="0" style="max-width:140px;">
+
+    <button class="btn btn-gold" style="margin-top:14px;" onclick="salvarAtividade()">Salvar atividade coletiva</button>
+    <p id="erroColetiva" class="error-msg" style="display:none;"></p>
+    <p id="okColetiva" style="color:#3B6D11; font-size:13px; margin-top:6px; display:none;"></p>
+  </div>
+
+  <div class="card">
+    <h2>Consultar atendimentos e atividades</h2>
     <div class="subtab-bar">
       <button class="subtab-btn active" id="btnPorDia" onclick="mudarModo('dia')">Por dia</button>
       <button class="subtab-btn" id="btnPorAtleta" onclick="mudarModo('atleta')">Por atleta</button>
@@ -71,7 +135,14 @@
       <button class="subtab-btn" data-f="colega" onclick="escolherFiltroAutor('colega')">Só do colega</button>
     </div>
 
+    <div class="subtab-bar">
+      <button class="subtab-btn active" data-t="todos" onclick="escolherFiltroTipo('todos')">Individuais + coletivas</button>
+      <button class="subtab-btn" data-t="individuais" onclick="escolherFiltroTipo('individuais')">Só individuais</button>
+      <button class="subtab-btn" data-t="coletivas" onclick="escolherFiltroTipo('coletivas')">Só coletivas</button>
+    </div>
+
     <div id="modoDia">
+      <div class="legenda-cal"><span class="dot" style="background:#C0A258;margin-left:0;"></span>Atendimento individual<span class="dot" style="background:#304E38;"></span>Atividade coletiva</div>
       <div class="cal-nav">
         <button onclick="mudarMes(-1)">‹</button>
         <span id="mesAtual" style="font-size:14px; color:#304E38; font-weight:600;"></span>
@@ -109,6 +180,8 @@ let mesRef = new Date();
 let diaSelecionado = null;
 let atletaConsultaSelecionado = null;
 let todosAtendimentos = [];
+let todasAtividades = [];
+let filtroTipo = "todos";
 
 onAuthStateChanged(auth, async (user) => {
   if (!user) { window.location.href = "index.html"; return; }
@@ -128,6 +201,13 @@ async function carregarAtletas() {
 async function carregarAtendimentos() {
   const snap = await getDocs(query(collection(db, "atendimentos_meta"), orderBy("data", "desc")));
   todosAtendimentos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  try {
+    const snapCol = await getDocs(query(collection(db, "atividades_coletivas"), orderBy("data", "desc")));
+    todasAtividades = snapCol.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    console.warn("Atividades coletivas indisponíveis (regras do Firestore ainda não atualizadas?)", err);
+    todasAtividades = [];
+  }
   renderCalendario();
   renderResultado();
 }
@@ -243,7 +323,10 @@ function renderCalendario() {
   document.getElementById("mesAtual").textContent = mesRef.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
 
   const diasComAtendimento = new Set(
-    todosAtendimentos.filter(passaFiltroAutor).map(a => a.data)
+    filtroTipo === "coletivas" ? [] : todosAtendimentos.filter(passaFiltroAutor).map(a => a.data)
+  );
+  const diasComColetiva = new Set(
+    filtroTipo === "individuais" ? [] : todasAtividades.filter(passaFiltroAutor).map(a => a.data)
   );
 
   const primeiroDia = new Date(ano, mes, 1).getDay();
@@ -260,7 +343,7 @@ function renderCalendario() {
   for (let dia = 1; dia <= totalDias; dia++) {
     const dataStr = `${ano}-${String(mes + 1).padStart(2, "0")}-${String(dia).padStart(2, "0")}`;
     const cell = document.createElement("div");
-    cell.className = "cal-day" + (diasComAtendimento.has(dataStr) ? " has-dot" : "") + (diaSelecionado === dataStr ? " selected" : "");
+    cell.className = "cal-day" + (diasComAtendimento.has(dataStr) ? " has-dot" : "") + (diasComColetiva.has(dataStr) ? " has-col" : "") + (diaSelecionado === dataStr ? " selected" : "");
     cell.textContent = dia;
     cell.onclick = () => {
       diaSelecionado = diaSelecionado === dataStr ? null : dataStr;
@@ -318,17 +401,20 @@ function renderResultado() {
   const listaEl = document.getElementById("resultadoLista");
   listaEl.innerHTML = "";
 
-  let resultado = todosAtendimentos.filter(passaFiltroAutor);
+  let resultado = filtroTipo === "coletivas" ? [] : todosAtendimentos.filter(passaFiltroAutor);
+  let coletivas = filtroTipo === "individuais" ? [] : todasAtividades.filter(passaFiltroAutor);
 
   if (modo === "dia") {
     if (!diaSelecionado) {
-      tituloEl.textContent = "Clique numa data do calendário para ver os atendimentos daquele dia.";
+      tituloEl.textContent = "Clique numa data do calendário para ver os atendimentos e atividades daquele dia.";
       return;
     }
     resultado = resultado.filter(a => a.data === diaSelecionado);
+    coletivas = coletivas.filter(a => a.data === diaSelecionado);
     const [y, m, d] = diaSelecionado.split("-");
-    tituloEl.textContent = `${d}/${m}/${y} · ${resultado.length} atendimento(s)`;
+    tituloEl.textContent = `${d}/${m}/${y} · ${resultado.length} atendimento(s) individual(is) · ${coletivas.length} atividade(s) coletiva(s)`;
   } else {
+    coletivas = [];
     if (!atletaConsultaSelecionado) {
       tituloEl.textContent = "Busque um atleta acima para ver o histórico de atendimentos dele.";
       return;
@@ -336,6 +422,8 @@ function renderResultado() {
     resultado = resultado.filter(a => a.atletaId === atletaConsultaSelecionado);
     tituloEl.textContent = `${resultado.length} atendimento(s) encontrado(s)`;
   }
+
+  coletivas.forEach(c => listaEl.appendChild(criarLinhaColetiva(c)));
 
   resultado.forEach(a => {
     const row = document.createElement("div");
@@ -388,6 +476,92 @@ async function alternarConteudo(id) {
     el.textContent = "Conteúdo privado — só quem fez o atendimento (ou, se marcado como compartilhado, ambos) pode ver.";
     el.dataset.carregado = "1";
   }
+}
+
+window.escolherFiltroTipo = function (t) {
+  filtroTipo = t;
+  document.querySelectorAll('[data-t]').forEach(b => b.classList.toggle("active", b.dataset.t === t));
+  renderCalendario();
+  renderResultado();
+};
+
+window.salvarAtividade = async function () {
+  const erroEl = document.getElementById("erroColetiva");
+  const okEl = document.getElementById("okColetiva");
+  erroEl.style.display = "none";
+  okEl.style.display = "none";
+
+  const assinatura = document.getElementById("assinaturaColetiva").value.trim();
+  const data = document.getElementById("dataColetiva").value;
+  const tema = document.getElementById("temaColetiva").value.trim();
+  const observacoes = document.getElementById("obsColetiva").value.trim();
+  const encaminhamentos = document.getElementById("encColetiva").value.trim();
+  const formato = document.getElementById("formatoColetiva").value;
+  const participantes = document.getElementById("partColetiva").value;
+
+  const categorias = [...document.querySelectorAll("#catColetiva input:checked")].map(i => i.value);
+  document.getElementById("catOutra").value.split(",").map(x => x.trim()).filter(Boolean).forEach(x => categorias.push(x));
+
+  if (!assinatura || !data || !tema || !observacoes || categorias.length === 0) {
+    erroEl.textContent = "Preencha responsável, data, ao menos uma categoria, tema e observações antes de salvar.";
+    erroEl.style.display = "block";
+    return;
+  }
+
+  try {
+    const id = doc(collection(db, "atividades_coletivas")).id;
+    await setDoc(doc(db, "atividades_coletivas", id), {
+      data, categorias, formato, tema, observacoes, encaminhamentos,
+      participantes: participantes ? Number(participantes) : null,
+      assinatura,
+      autorUid: usuarioAtual.uid,
+      criadoEm: new Date().toISOString()
+    });
+  } catch (err) {
+    erroEl.textContent = "Não foi possível salvar. Confira se as regras do Firestore foram atualizadas para a coleção atividades_coletivas.";
+    erroEl.style.display = "block";
+    return;
+  }
+
+  okEl.textContent = "Atividade coletiva salva.";
+  okEl.style.display = "block";
+  ["dataColetiva", "temaColetiva", "obsColetiva", "encColetiva", "partColetiva", "catOutra"].forEach(i => document.getElementById(i).value = "");
+  document.getElementById("formatoColetiva").value = "";
+  document.querySelectorAll("#catColetiva input").forEach(i => i.checked = false);
+  await carregarAtendimentos();
+};
+
+function criarLinhaColetiva(c) {
+  const row = document.createElement("div");
+  row.className = "entry";
+  const [y, m, d] = (c.data || "").split("-");
+  const dataFmt = y ? `${d}/${m}/${y}` : "";
+  const cats = (c.categorias || []).map(x => `<span class="pill pill-outline" style="margin-right:4px;">${esc(x)}</span>`).join("");
+  const formatoHtml = c.formato ? `<span class="pill pill-outline" style="margin-right:4px;">${esc(c.formato)}</span>` : "";
+  const partHtml = c.participantes ? `<span class="hint"> · ${esc(c.participantes)} participante(s)</span>` : "";
+  const podeExcluir = c.autorUid === usuarioAtual.uid;
+  const excluirBtn = podeExcluir ? `<button class="btn btn-outline" style="font-size:11px; padding:3px 8px; margin-left:8px;" data-excluir-col="${c.id}">Excluir</button>` : "";
+  const encHtml = c.encaminhamentos
+    ? `<div style="font-size:13px; color:#304E38; margin-top:6px;"><strong>Próximos passos:</strong> ${esc(c.encaminhamentos)}</div>` : "";
+  row.innerHTML = `
+    <div class="meta">
+      <span class="pill pill-gold">Coletiva</span>
+      <strong style="color:#304E38; margin-left:6px;">${esc(c.tema)}</strong>
+      · ${dataFmt} · ${esc(c.assinatura)}
+      ${excluirBtn}
+    </div>
+    <div style="margin-top:6px;">${cats}${formatoHtml}${partHtml}</div>
+    <div style="font-size:13px; color:#304E38; background:#FCFBF7; border-radius:8px; padding:8px 10px; margin-top:8px; white-space:pre-wrap;">${esc(c.observacoes)}</div>
+    ${encHtml}
+  `;
+  if (podeExcluir) {
+    row.querySelector("[data-excluir-col]").addEventListener("click", async () => {
+      if (!confirm("Excluir esta atividade coletiva? Essa ação não pode ser desfeita.")) return;
+      await deleteDoc(doc(db, "atividades_coletivas", c.id));
+      await carregarAtendimentos();
+    });
+  }
+  return row;
 }
 
 function esc(str) {
