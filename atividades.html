@@ -19,6 +19,7 @@
     <button onclick="window.location.href='atletas.html'" style="margin-right:8px;">Atletas</button>
     <button onclick="window.location.href='atendimentos.html'" style="margin-right:8px;">Atendimentos</button>
     <button onclick="window.location.href='atividades.html'" style="margin-right:8px;">Atividades coletivas</button>
+    <button onclick="window.location.href='registro.html'" style="margin-right:8px;">Planilha</button>
     <button onclick="window.location.href='admin-tipos.html'" style="margin-right:8px;">Tipos de registro</button>
     <button onclick="window.location.href='importar-anamneses.html'" style="margin-right:8px;">Importar</button>
     <button onclick="sair()">Sair</button>
@@ -28,7 +29,8 @@
 <div class="container">
 
   <div class="card">
-    <h2>Nova atividade coletiva</h2>
+    <h2 id="tituloForm">Nova atividade coletiva</h2>
+    <p id="avisoEdicao" class="hint" style="display:none;"></p>
     <p class="hint" style="margin-bottom:10px;">Palestras, psicoeducação, dinâmicas de grupo e outras atividades com a categoria. O registro fica visível aos dois profissionais.</p>
 
     <label for="assinatura">Responsável (assinatura)</label>
@@ -75,7 +77,8 @@
     <label for="part">Nº de participantes (opcional)</label>
     <input type="number" id="part" min="0" style="max-width:140px;">
 
-    <button class="btn btn-gold" style="margin-top:14px;" onclick="salvarAtividade()">Salvar atividade coletiva</button>
+    <button class="btn btn-gold" id="btnSalvar" style="margin-top:14px;" onclick="salvarAtividade()">Salvar atividade coletiva</button>
+    <button class="btn btn-outline" id="btnCancelarEdicao" style="margin-top:14px; margin-left:8px; display:none;" onclick="cancelarEdicao()">Cancelar edição</button>
     <p id="erro" class="error-msg" style="display:none;"></p>
     <p id="ok" style="color:#3B6D11; font-size:13px; margin-top:6px; display:none;"></p>
   </div>
@@ -106,7 +109,7 @@
 import { firebaseConfig } from "./firebase-config.js";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, collection, doc, setDoc, deleteDoc, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, collection, doc, setDoc, updateDoc, deleteDoc, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -118,6 +121,8 @@ let usuarioAtual = null;
 let atividades = [];
 let filtroAutor = "todos";
 let filtroCat = "";
+let editandoId = null;
+let paramTratado = false;
 
 onAuthStateChanged(auth, async (user) => {
   if (!user) { window.location.href = "index.html"; return; }
@@ -139,6 +144,14 @@ async function carregarAtividades() {
   }
   montarFiltroCategoria();
   renderResultado();
+
+  const paramEditar = new URLSearchParams(window.location.search).get("editar");
+  if (paramEditar && !paramTratado) {
+    paramTratado = true;
+    const alvo = atividades.find(x => x.id === paramEditar);
+    if (alvo && alvo.autorUid === usuarioAtual.uid) iniciarEdicao(alvo);
+    else document.getElementById("resultadoTitulo").textContent = "Só quem registrou a atividade pode editá-la.";
+  }
 }
 
 function montarFiltroCategoria() {
@@ -190,6 +203,8 @@ function criarLinha(c) {
   const formatoHtml = c.formato ? `<span class="pill pill-outline" style="margin-right:4px;">${esc(c.formato)}</span>` : "";
   const partHtml = c.participantes ? `<span class="hint"> · ${esc(c.participantes)} participante(s)</span>` : "";
   const podeExcluir = c.autorUid === usuarioAtual.uid;
+  const editarBtn = podeExcluir ? `<button class="btn btn-outline" style="font-size:11px; padding:3px 8px; margin-left:8px;" data-editar="${escAttr(c.id)}">Editar</button>` : "";
+  const editadoHint = c.editadoEm ? ` <span class="hint">· editado em ${new Date(c.editadoEm).toLocaleDateString("pt-BR")}</span>` : "";
   const excluirBtn = podeExcluir ? `<button class="btn btn-outline" style="font-size:11px; padding:3px 8px; margin-left:8px;" data-excluir="${escAttr(c.id)}">Excluir</button>` : "";
   const encHtml = c.encaminhamentos
     ? `<div style="font-size:13px; color:#304E38; margin-top:6px;"><strong>Próximos passos:</strong> ${esc(c.encaminhamentos)}</div>` : "";
@@ -197,13 +212,16 @@ function criarLinha(c) {
   row.innerHTML = `
     <div class="meta">
       <strong style="color:#304E38;">${esc(c.tema)}</strong>
-      · ${dataFmt} · ${esc(c.assinatura)}
-      ${excluirBtn}
+      · ${dataFmt} · ${esc(c.assinatura)}${editadoHint}
+      ${editarBtn}${excluirBtn}
     </div>
     <div style="margin-top:6px;">${cats}${formatoHtml}${partHtml}</div>
     <div style="font-size:13px; color:#304E38; background:#FCFBF7; border-radius:8px; padding:8px 10px; margin-top:8px; white-space:pre-wrap;">${esc(c.observacoes)}</div>
     ${encHtml}
   `;
+  if (podeExcluir) {
+    row.querySelector("[data-editar]").addEventListener("click", () => iniciarEdicao(c));
+  }
   if (podeExcluir) {
     row.querySelector("[data-excluir]").addEventListener("click", async () => {
       if (!confirm("Excluir esta atividade coletiva? Essa ação não pode ser desfeita.")) return;
@@ -237,27 +255,75 @@ window.salvarAtividade = async function () {
     return;
   }
 
+  const eraEdicao = !!editandoId;
   try {
-    const id = doc(collection(db, "atividades_coletivas")).id;
-    await setDoc(doc(db, "atividades_coletivas", id), {
-      data, categorias, formato, tema, observacoes, encaminhamentos,
-      participantes: participantes ? Number(participantes) : null,
-      assinatura,
-      autorUid: usuarioAtual.uid,
-      criadoEm: new Date().toISOString()
-    });
+    if (editandoId) {
+      await updateDoc(doc(db, "atividades_coletivas", editandoId), {
+        data, categorias, formato, tema, observacoes, encaminhamentos,
+        participantes: participantes ? Number(participantes) : null,
+        assinatura,
+        editadoEm: new Date().toISOString()
+      });
+    } else {
+      const id = doc(collection(db, "atividades_coletivas")).id;
+      await setDoc(doc(db, "atividades_coletivas", id), {
+        data, categorias, formato, tema, observacoes, encaminhamentos,
+        participantes: participantes ? Number(participantes) : null,
+        assinatura,
+        autorUid: usuarioAtual.uid,
+        criadoEm: new Date().toISOString()
+      });
+    }
   } catch (err) {
     erroEl.textContent = "Não foi possível salvar. Confira se as regras do Firestore foram atualizadas para a coleção atividades_coletivas.";
     erroEl.style.display = "block";
     return;
   }
 
-  okEl.textContent = "Atividade coletiva salva.";
+  limparFormulario();
+  okEl.textContent = eraEdicao ? "Alterações salvas." : "Atividade coletiva salva.";
   okEl.style.display = "block";
+  await carregarAtividades();
+};
+
+function limparFormulario() {
+  editandoId = null;
+  document.getElementById("tituloForm").textContent = "Nova atividade coletiva";
+  document.getElementById("avisoEdicao").style.display = "none";
+  document.getElementById("btnSalvar").textContent = "Salvar atividade coletiva";
+  document.getElementById("btnCancelarEdicao").style.display = "none";
   ["dataAtv", "tema", "obs", "enc", "part", "catOutra"].forEach(i => document.getElementById(i).value = "");
   document.getElementById("formato").value = "";
   document.querySelectorAll("#catGrid input").forEach(i => i.checked = false);
-  await carregarAtividades();
+}
+
+function iniciarEdicao(c) {
+  if (c.autorUid !== usuarioAtual.uid) return;
+  editandoId = c.id;
+  document.getElementById("tituloForm").textContent = "Editar atividade coletiva";
+  const aviso = document.getElementById("avisoEdicao");
+  aviso.textContent = "Você está editando uma atividade já salva. As alterações substituem o registro anterior.";
+  aviso.style.display = "block";
+  document.getElementById("assinatura").value = c.assinatura || "";
+  document.getElementById("dataAtv").value = c.data || "";
+  const cats = c.categorias || [];
+  document.querySelectorAll("#catGrid input").forEach(i => i.checked = cats.includes(i.value));
+  document.getElementById("catOutra").value = cats.filter(x => !CATEGORIAS_PADRAO.includes(x)).join(", ");
+  document.getElementById("formato").value = c.formato || "";
+  document.getElementById("tema").value = c.tema || "";
+  document.getElementById("obs").value = c.observacoes || "";
+  document.getElementById("enc").value = c.encaminhamentos || "";
+  document.getElementById("part").value = c.participantes ?? "";
+  document.getElementById("btnSalvar").textContent = "Salvar alterações";
+  document.getElementById("btnCancelarEdicao").style.display = "inline-block";
+  document.getElementById("erro").style.display = "none";
+  document.getElementById("ok").style.display = "none";
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+window.cancelarEdicao = function () {
+  limparFormulario();
+  if (window.history && window.history.replaceState) window.history.replaceState(null, "", "atividades.html");
 };
 
 function esc(str) {
