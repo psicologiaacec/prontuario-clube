@@ -14,6 +14,7 @@
     <button onclick="window.location.href='atletas.html'" style="margin-right:8px;">Atletas</button>
     <button onclick="window.location.href='atendimentos.html'" style="margin-right:8px;">Atendimentos</button>
     <button onclick="window.location.href='atividades.html'" style="margin-right:8px;">Atividades coletivas</button>
+    <button onclick="window.location.href='registro.html'" style="margin-right:8px;">Planilha</button>
     <button onclick="window.location.href='admin-tipos.html'" style="margin-right:8px;">Tipos de registro</button>
     <button onclick="window.location.href='importar-anamneses.html'" style="margin-right:8px;">Importar</button>
     <button onclick="sair()">Sair</button>
@@ -26,8 +27,9 @@
       <div>
         <h1 id="nomeAtleta">—</h1>
         <p class="sub" id="metaAtleta">—</p>
+        <p class="hint" id="avisoAutoriaAtleta" style="margin:-8px 0 0;"></p>
       </div>
-      <div class="no-print">
+      <div class="no-print" id="acoesAtleta">
         <button class="btn btn-outline" style="font-size:12px; margin-right:6px;" onclick="alternarEdicao()">Editar dados</button>
         <button class="btn btn-outline" style="font-size:12px; color:#A32D2D; border-color:#A32D2D;" onclick="excluirAtleta()">Excluir atleta</button>
       </div>
@@ -44,6 +46,7 @@
         <div style="flex:1;"><label>Data de entrada no clube</label><input type="date" id="edit_dataEntrada"></div>
       </div>
       <button class="btn btn-gold" style="margin-top:10px;" onclick="salvarEdicaoAtleta()">Salvar alterações</button>
+      <p id="edit_erro" class="error-msg" style="display:none;"></p>
     </div>
   </div>
 
@@ -92,6 +95,11 @@ let tipoAtivo = null;
 let abaPrincipal = "anamnese";
 let parteAtiva = 1;
 let anamneseData = { parte1: {}, parte2: {} };
+let podeEditarAtleta = false;
+let parte1Travada = false;
+let parte2Travada = false;
+let registroEmEdicao = null;
+let regsCache = [];
 
 const FATORES_PRIORIDADE = ["Estudo","Dinheiro","Paz","Sucesso/fama","Família","Amor/relacionamento","Saúde","Futebol","Deus","Bem-estar"];
 const TRACOS = ["Calmo","Irritado","Agressivo","Tímido","Autoexigente","Disciplinado","Tolerante à dor","Resistente a longa rotina de treinamento","Tolerante às frustrações"];
@@ -113,6 +121,10 @@ async function carregarAtleta() {
   const snap = await getDoc(doc(db, "atletas", atletaId));
   if (!snap.exists()) { window.location.href = "atletas.html"; return; }
   atletaData = snap.data();
+  // a ficha (cadastro) do atleta pode ser editada pelos dois profissionais
+  podeEditarAtleta = true;
+  document.getElementById("acoesAtleta").style.display = "block";
+  document.getElementById("avisoAutoriaAtleta").textContent = atletaData.assinatura ? `Cadastro feito por ${atletaData.assinatura}.` : "";
   document.getElementById("nomeAtleta").textContent = atletaData.nome;
   const entradaFmt = atletaData.dataEntrada ? formatarData(atletaData.dataEntrada) : null;
   document.getElementById("metaAtleta").textContent =
@@ -141,6 +153,7 @@ window.selecionarPrincipal = function (chave) {
     document.getElementById("painelAnamnese").style.display = "none";
     document.getElementById("painelGenerico").style.display = "block";
     tipoAtivo = tipos.find(t => t.id === chave);
+    registroEmEdicao = null;
     renderFormularioGenerico();
     carregarHistoricoGenerico();
   }
@@ -169,6 +182,25 @@ async function carregarTipos() {
   });
 }
 
+// ---- trava de edição da anamnese (só quem assinou a parte pode alterá-la) ----
+function aplicarTravaParte(prefixo, travada, parte) {
+  const wrap = document.getElementById(`${prefixo}_wrap`);
+  const aviso = document.getElementById(`${prefixo}_aviso`);
+  const base = "background:#F4F0E4; border:1px solid #DED5C2; border-radius:8px; padding:8px 12px; font-size:13px; color:#5A5344; margin-bottom:10px;";
+  if (travada) {
+    aviso.textContent = `Preenchida por ${parte.assinatura || "outro profissional"}. Só essa pessoa pode editar esta parte.`;
+    aviso.style.cssText = base + " display:block;";
+    wrap.style.pointerEvents = "none";
+    wrap.style.opacity = "0.75";
+    wrap.querySelectorAll("input, select, textarea, button").forEach(x => x.disabled = true);
+  } else if (!parte.autorUid && parte.assinatura) {
+    aviso.textContent = "Esta parte é anterior ao controle de autoria. Ao salvar, você passa a ser o profissional responsável por ela, e só você poderá editá-la depois.";
+    aviso.style.cssText = base + " display:block;";
+  } else {
+    aviso.style.display = "none";
+  }
+}
+
 // =====================================================================
 // ANAMNESE — PARTE 1
 // =====================================================================
@@ -182,8 +214,10 @@ function renderParte1() {
       <button class="btn btn-outline no-print" style="font-size:12px;" onclick="gerarRelatorioParte1()">📄 Gerar relatório PDF</button>
     </div>
 
+    <div id="p1_aviso" style="display:none;"></div>
+    <div id="p1_wrap">
     <label>Assinatura (nome do profissional)</label>
-    <input type="text" id="p1_assinatura" placeholder="Seu nome completo">
+    <input type="text" id="p1_assinatura" placeholder="Seu nome completo" value="${escAttr(p1.assinatura)}">
 
     <div style="display:flex; gap:12px;">
       <div style="flex:1;"><label>Data da anamnese</label><input type="date" id="p1_dataAnamnese" value="${p1.dataAnamnese || ''}"></div>
@@ -226,8 +260,11 @@ function renderParte1() {
     <button class="btn btn-gold" style="margin-top:14px;" onclick="salvarParte1()">Salvar Parte 1</button>
     <p id="p1_erro" class="error-msg" style="display:none;"></p>
     <p id="p1_ok" style="color:#3B6D11; font-size:13px; margin-top:6px; display:none;"></p>
+    </div>
   `;
+  parte1Travada = !!(p1.autorUid && p1.autorUid !== usuarioAtual.uid);
   renderTimeline(clubes);
+  aplicarTravaParte("p1", parte1Travada, p1);
 }
 
 let clubesTemp = [];
@@ -247,6 +284,7 @@ function renderTimeline(clubes) {
       <p class="clube-periodo">${escHtml(c.inicio)} – ${escHtml(c.fim)}</p>
     `;
     item.querySelector("button").addEventListener("click", () => {
+      if (parte1Travada) return;
       clubesTemp.splice(i, 1);
       renderTimeline(clubesTemp);
     });
@@ -255,6 +293,7 @@ function renderTimeline(clubes) {
 }
 
 window.adicionarClube = function () {
+  if (parte1Travada) return;
   const nome = document.getElementById("novoClubeNome").value.trim();
   const inicio = document.getElementById("novoClubeInicio").value.trim();
   const fim = document.getElementById("novoClubeFim").value.trim();
@@ -267,6 +306,7 @@ window.adicionarClube = function () {
 };
 
 window.salvarParte1 = async function () {
+  if (parte1Travada) return;
   const erroEl = document.getElementById("p1_erro");
   const okEl = document.getElementById("p1_ok");
   erroEl.style.display = "none"; okEl.style.display = "none";
@@ -289,11 +329,14 @@ window.salvarParte1 = async function () {
     contextoFamiliar: document.getElementById("p1_contextoFamiliar").value.trim(),
     observacoes: document.getElementById("p1_observacoes").value.trim(),
     assinatura,
+    autorUid: usuarioAtual.uid,
     atualizadoEm: new Date().toISOString()
   };
 
   anamneseData.parte1 = parte1;
-  await setDoc(doc(db, "anamneses", atletaId), { parte1, parte2: anamneseData.parte2 }, { merge: true });
+  // grava só a Parte 1, sem tocar na Parte 2 (assim uma parte nunca sobrescreve a outra)
+  await setDoc(doc(db, "anamneses", atletaId), { parte1 }, { merge: true });
+  document.getElementById("p1_aviso").style.display = "none";
 
   okEl.textContent = "Parte 1 salva.";
   okEl.style.display = "block";
@@ -348,8 +391,10 @@ function renderParte2() {
   el.innerHTML = `
     <p class="hint">Uso interno da equipe de psicologia — não pode ser exportado.</p>
 
+    <div id="p2_aviso" style="display:none;"></div>
+    <div id="p2_wrap">
     <label>Assinatura (nome do profissional)</label>
-    <input type="text" id="p2_assinatura" placeholder="Seu nome completo">
+    <input type="text" id="p2_assinatura" placeholder="Seu nome completo" value="${escAttr(p2.assinatura)}">
 
     <label>Trajetória no futebol (início, motivações, posição, treinador ideal, ídolo)</label>
     <textarea id="p2_trajetoria">${escHtml(p2.trajetoria)}</textarea>
@@ -392,9 +437,12 @@ function renderParte2() {
     <button class="btn btn-gold" style="margin-top:14px;" onclick="salvarParte2()">Salvar Parte 2</button>
     <p id="p2_erro" class="error-msg" style="display:none;"></p>
     <p id="p2_ok" style="color:#3B6D11; font-size:13px; margin-top:6px; display:none;"></p>
+    </div>
   `;
+  parte2Travada = !!(p2.autorUid && p2.autorUid !== usuarioAtual.uid);
   renderRanking();
   renderTraitGrid();
+  aplicarTravaParte("p2", parte2Travada, p2);
 }
 
 function renderRanking() {
@@ -406,6 +454,7 @@ function renderRanking() {
     row.className = "rank-row";
     row.innerHTML = `<span class="rank-badge ${pos >= 0 ? 'filled' : ''}">${pos >= 0 ? pos + 1 : ''}</span><span>${escHtml(f)}</span>`;
     row.onclick = () => {
+      if (parte2Travada) return;
       if (ordemPrioridades.includes(f)) ordemPrioridades = ordemPrioridades.filter(x => x !== f);
       else ordemPrioridades.push(f);
       renderRanking();
@@ -414,7 +463,7 @@ function renderRanking() {
   });
 }
 
-window.resetRanking = function () { ordemPrioridades = []; renderRanking(); };
+window.resetRanking = function () { if (parte2Travada) return; ordemPrioridades = []; renderRanking(); };
 
 function renderTraitGrid() {
   const el = document.getElementById("traitGrid");
@@ -431,11 +480,12 @@ function renderTraitGrid() {
     el.appendChild(row);
   });
   el.querySelectorAll(".trait-radio").forEach(s => {
-    s.onclick = () => { respostasTracos[s.dataset.t] = s.dataset.o; renderTraitGrid(); };
+    s.onclick = () => { if (parte2Travada) return; respostasTracos[s.dataset.t] = s.dataset.o; renderTraitGrid(); };
   });
 }
 
 window.salvarParte2 = async function () {
+  if (parte2Travada) return;
   const erroEl = document.getElementById("p2_erro");
   const okEl = document.getElementById("p2_ok");
   erroEl.style.display = "none"; okEl.style.display = "none";
@@ -458,11 +508,14 @@ window.salvarParte2 = async function () {
     comoAjudar: document.getElementById("p2_comoAjudar").value.trim(),
     observacoesPsicologicas: document.getElementById("p2_observacoes").value.trim(),
     assinatura,
+    autorUid: usuarioAtual.uid,
     atualizadoEm: new Date().toISOString()
   };
 
   anamneseData.parte2 = parte2;
-  await setDoc(doc(db, "anamneses", atletaId), { parte1: anamneseData.parte1, parte2 }, { merge: true });
+  // grava só a Parte 2, sem tocar na Parte 1
+  await setDoc(doc(db, "anamneses", atletaId), { parte2 }, { merge: true });
+  document.getElementById("p2_aviso").style.display = "none";
 
   okEl.textContent = "Parte 2 salva.";
   okEl.style.display = "block";
@@ -471,21 +524,26 @@ window.salvarParte2 = async function () {
 // =====================================================================
 // ABAS GENÉRICAS (ex.: Acompanhamento e outras criadas em "Tipos de registro")
 // =====================================================================
-function renderFormularioGenerico() {
+function renderFormularioGenerico(reg = null) {
   const el = document.getElementById("formNovoRegistro");
   if (!tipoAtivo) { el.innerHTML = ""; return; }
 
   let camposHtml = tipoAtivo.campos.map((campo, idx) => {
     const id = `campo-${idx}`;
-    if (campo.tipo === "texto_curto") return `<label>${escHtml(campo.nome)}</label><input type="text" id="${id}">`;
-    if (campo.tipo === "texto_sugestoes") return `<label>${escHtml(campo.nome)}</label><input type="text" id="${id}" list="dl-${id}" autocomplete="off"><datalist id="dl-${id}"></datalist>`;
-    if (campo.tipo === "texto_longo") return `<label>${escHtml(campo.nome)}</label><textarea id="${id}"></textarea>`;
-    if (campo.tipo === "data") return `<label>${escHtml(campo.nome)}</label><input type="date" id="${id}">`;
+    const v = reg && reg.dados && reg.dados[campo.nome] !== undefined ? reg.dados[campo.nome] : "";
+    if (campo.tipo === "texto_curto") return `<label>${escHtml(campo.nome)}</label><input type="text" id="${id}" value="${escAttr(v)}">`;
+    if (campo.tipo === "texto_sugestoes") return `<label>${escHtml(campo.nome)}</label><input type="text" id="${id}" list="dl-${id}" autocomplete="off" value="${escAttr(v)}"><datalist id="dl-${id}"></datalist>`;
+    if (campo.tipo === "texto_longo") return `<label>${escHtml(campo.nome)}</label><textarea id="${id}">${escHtml(v)}</textarea>`;
+    if (campo.tipo === "data") return `<label>${escHtml(campo.nome)}</label><input type="date" id="${id}" value="${escAttr(v)}">`;
     if (campo.tipo === "selecao") {
-      const opts = (campo.opcoes || []).map(o => `<option value="${escAttr(o)}">${escHtml(o)}</option>`).join("");
+      const opts = (campo.opcoes || []).map(o => `<option value="${escAttr(o)}" ${o === v ? "selected" : ""}>${escHtml(o)}</option>`).join("");
       return `<label>${escHtml(campo.nome)}</label><select id="${id}"><option value="">Selecione</option>${opts}</select>`;
     }
-    if (campo.tipo === "anexo") return `<label>${escHtml(campo.nome)}</label><input type="file" id="${id}"><p class="hint">Até 700KB por arquivo.</p>`;
+    if (campo.tipo === "anexo") {
+      const atual = reg && reg.anexos && reg.anexos[campo.nome]
+        ? `<p class="hint">Anexo atual: ${escHtml(reg.anexos[campo.nome].nome)}. Envie outro arquivo só se quiser substituí-lo.</p>` : "";
+      return `<label>${escHtml(campo.nome)}</label><input type="file" id="${id}"><p class="hint">Até 700KB por arquivo.</p>${atual}`;
+    }
     return "";
   }).join("");
 
@@ -493,21 +551,30 @@ function renderFormularioGenerico() {
   if (tipoAtivo.visibilidadePadrao === "mista") {
     visivelColegaHtml = `
       <label style="display:flex; align-items:center; gap:8px; margin-top:14px;">
-        <input type="checkbox" id="visivelColega" style="width:auto;"> Visível ao colega
+        <input type="checkbox" id="visivelColega" style="width:auto;" ${reg && reg.visivelColega ? "checked" : ""}> Visível ao colega
       </label>`;
   }
 
+  const cancelarHtml = reg
+    ? `<button class="btn btn-outline" style="margin-top:14px; margin-left:8px;" onclick="cancelarEdicaoRegistro()">Cancelar edição</button>` : "";
+
   el.innerHTML = `
-    <h2>Novo registro · ${escHtml(tipoAtivo.nome)}</h2>
+    <h2>${reg ? "Editar registro" : "Novo registro"} · ${escHtml(tipoAtivo.nome)}</h2>
     <p class="sub">${legendaVisibilidadeGenerica(tipoAtivo.visibilidadePadrao)}</p>
     <label>Assinatura (nome do profissional)</label>
-    <input type="text" id="assinaturaGenerica" placeholder="Seu nome completo">
+    <input type="text" id="assinaturaGenerica" placeholder="Seu nome completo" value="${escAttr(reg ? reg.assinatura : "")}">
     ${camposHtml}
     ${visivelColegaHtml}
-    <button class="btn btn-gold" style="margin-top:14px;" onclick="salvarRegistroGenerico()">Salvar registro</button>
+    <button class="btn btn-gold" style="margin-top:14px;" onclick="salvarRegistroGenerico()">${reg ? "Salvar alterações" : "Salvar registro"}</button>${cancelarHtml}
     <p id="erroRegistro" class="error-msg" style="display:none;"></p>
   `;
 }
+
+window.cancelarEdicaoRegistro = function () {
+  registroEmEdicao = null;
+  renderFormularioGenerico();
+  popularSugestoes(regsCache);
+};
 
 function legendaVisibilidadeGenerica(v) {
   if (v === "compartilhada") return "Compartilhada — os dois profissionais veem este registro.";
@@ -527,7 +594,7 @@ window.salvarRegistroGenerico = async function () {
   }
 
   const dados = {};
-  const anexos = {};
+  const anexos = registroEmEdicao ? { ...(registroEmEdicao.anexos || {}) } : {};
   let temErro = false;
 
   for (let idx = 0; idx < tipoAtivo.campos.length; idx++) {
@@ -560,15 +627,31 @@ window.salvarRegistroGenerico = async function () {
   const visivelColegaEl = document.getElementById("visivelColega");
   const visivelColega = tipoAtivo.visibilidadePadrao === "mista" ? !!(visivelColegaEl && visivelColegaEl.checked) : false;
 
-  await addDoc(collection(db, "registros"), {
-    atletaId, tipoId: tipoAtivo.id,
-    dados, anexos,
-    visivelColega,
-    assinatura,
-    autorUid: usuarioAtual.uid,
-    autorEmail: usuarioAtual.email,
-    criadoEm: serverTimestamp()
-  });
+  if (registroEmEdicao) {
+    // edição: só mexe nos campos editáveis; autor, atleta e data de criação ficam como estavam
+    try {
+      await updateDoc(doc(db, "registros", registroEmEdicao.id), {
+        dados, anexos, visivelColega, assinatura,
+        editadoEm: new Date().toISOString()
+      });
+    } catch (err) {
+      console.error(err);
+      erroEl.textContent = "Não foi possível salvar a alteração. Confira se as regras do Firestore permitem a edição pelo autor. Nada foi perdido: o registro continua como estava.";
+      erroEl.style.display = "block";
+      return;
+    }
+    registroEmEdicao = null;
+  } else {
+    await addDoc(collection(db, "registros"), {
+      atletaId, tipoId: tipoAtivo.id,
+      dados, anexos,
+      visivelColega,
+      assinatura,
+      autorUid: usuarioAtual.uid,
+      autorEmail: usuarioAtual.email,
+      criadoEm: serverTimestamp()
+    });
+  }
 
   renderFormularioGenerico();
   carregarHistoricoGenerico();
@@ -585,6 +668,7 @@ async function carregarHistoricoGenerico() {
   let regs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
   regs.sort((a, b) => (b.criadoEm?.seconds || 0) - (a.criadoEm?.seconds || 0));
 
+  regsCache = regs;
   semEl.style.display = regs.length === 0 ? "block" : "none";
   popularSugestoes(regs);
 
@@ -600,15 +684,28 @@ async function carregarHistoricoGenerico() {
     let anexosStr = Object.entries(r.anexos || {}).map(([k, v]) =>
       `<a class="attachment-link" href="${v.dados}" download="${escAttr(v.nome)}">📎 ${escHtml(v.nome)}</a>`
     ).join("");
+    const ehAutor = r.autorUid ? r.autorUid === usuarioAtual.uid : (!!r.autorEmail && r.autorEmail === usuarioAtual.email);
+    const editadoHint = r.editadoEm ? ` <span class="hint">· editado em ${new Date(r.editadoEm).toLocaleDateString("pt-BR")}</span>` : "";
+    const editarBtn = ehAutor
+      ? `<button class="btn btn-outline no-print" style="font-size:11px; padding:3px 8px; margin-left:8px;" data-editar="${r.id}">Editar</button>`
+      : "";
     const podeExcluir = r.autorUid === usuarioAtual.uid;
     const excluirBtn = podeExcluir
       ? `<button class="btn btn-outline no-print" style="font-size:11px; padding:3px 8px; margin-left:8px;" data-excluir="${r.id}">Excluir</button>`
       : "";
     div.innerHTML = `
-      <div class="meta">${escHtml(autor)} · ${dataStr} ${badge}${excluirBtn}</div>
+      <div class="meta">${escHtml(autor)} · ${dataStr}${editadoHint} ${badge}${editarBtn}${excluirBtn}</div>
       ${camposStr}
       ${anexosStr}
     `;
+    if (ehAutor) {
+      div.querySelector("[data-editar]").addEventListener("click", () => {
+        registroEmEdicao = r;
+        renderFormularioGenerico(r);
+        popularSugestoes(regsCache);
+        document.getElementById("formNovoRegistro").scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
     if (podeExcluir) {
       div.querySelector("[data-excluir]").addEventListener("click", async () => {
         if (!confirm("Excluir este registro? Essa ação não pode ser desfeita.")) return;
@@ -641,10 +738,18 @@ window.alternarEdicao = function () {
     document.getElementById("edit_categoria").value = atletaData.categoria || "";
     document.getElementById("edit_posicao").value = atletaData.posicao || "";
     document.getElementById("edit_dataEntrada").value = atletaData.dataEntrada || "";
+    document.getElementById("edit_erro").style.display = "none";
   }
 };
 
+function normalizarNome(txt) {
+  return String(txt || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
 window.salvarEdicaoAtleta = async function () {
+  const erroEl = document.getElementById("edit_erro");
+  erroEl.style.display = "none";
+
   const dados = {
     nome: document.getElementById("edit_nome").value.trim(),
     ano: document.getElementById("edit_ano").value.trim(),
@@ -652,13 +757,32 @@ window.salvarEdicaoAtleta = async function () {
     posicao: document.getElementById("edit_posicao").value.trim(),
     dataEntrada: document.getElementById("edit_dataEntrada").value
   };
-  await updateDoc(doc(db, "atletas", atletaId), dados);
-  atletaData = { ...atletaData, ...dados };
-  document.getElementById("nomeAtleta").textContent = atletaData.nome;
-  const entradaFmt = atletaData.dataEntrada ? formatarData(atletaData.dataEntrada) : null;
-  document.getElementById("metaAtleta").textContent =
-    `${atletaData.ano || "—"}${atletaData.categoria ? " · " + atletaData.categoria : ""}${atletaData.posicao ? " · " + atletaData.posicao : ""}${entradaFmt ? " · no clube desde " + entradaFmt : ""}`;
+
+  if (!dados.nome) {
+    erroEl.textContent = "Preencha o nome do atleta antes de salvar.";
+    erroEl.style.display = "block";
+    return;
+  }
+
+  // não deixa o nome ficar igual ao de outro atleta já cadastrado
+  const snapTodos = await getDocs(collection(db, "atletas"));
+  const outro = snapTodos.docs.find(d => d.id !== atletaId && normalizarNome(d.data().nome) === normalizarNome(dados.nome));
+  if (outro) {
+    erroEl.textContent = `Já existe outro atleta cadastrado com o nome "${outro.data().nome}". Nada foi alterado.`;
+    erroEl.style.display = "block";
+    return;
+  }
+
+  try {
+    await updateDoc(doc(db, "atletas", atletaId), { ...dados, editadoEm: new Date().toISOString() });
+  } catch (err) {
+    console.error(err);
+    erroEl.textContent = "Não foi possível salvar a alteração. Nada foi perdido: o cadastro continua como estava.";
+    erroEl.style.display = "block";
+    return;
+  }
   document.getElementById("edicaoAtleta").style.display = "none";
+  await carregarAtleta();
 };
 
 window.excluirAtleta = async function () {

@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Planilha · Prontuário</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  .filtros { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; margin-bottom: 12px; }
+  .filtros > div { flex: 1 1 150px; min-width: 140px; }
+  .filtros label { margin-top: 0; }
+  .tabela-wrap { overflow-x: auto; border: 1px solid #DED5C2; border-radius: 10px; margin-top: 10px; }
+  table.planilha { border-collapse: collapse; width: 100%; min-width: 980px; font-size: 13px; background: #fff; }
+  table.planilha th {
+    background: #304E38; color: #fff; text-align: left; padding: 9px 10px;
+    font-weight: 600; position: sticky; top: 0; white-space: nowrap;
+  }
+  table.planilha td { padding: 8px 10px; vertical-align: top; border-top: 1px solid #EFEAD9; color: #304E38; }
+  table.planilha tr:nth-child(even) td { background: #FBF8F1; }
+  table.planilha td.data { white-space: nowrap; font-style: italic; }
+  table.planilha td.obs { white-space: pre-wrap; min-width: 240px; }
+  table.planilha td.priv { color: #8C8A80; font-style: italic; }
+  .acoes-download { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .nota-sigilo { font-size: 12px; color: #8C8A80; margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="brand">Prontuário · Cuiabá EC</span>
+  <div>
+    <button onclick="window.location.href='atletas.html'" style="margin-right:8px;">Atletas</button>
+    <button onclick="window.location.href='atendimentos.html'" style="margin-right:8px;">Atendimentos</button>
+    <button onclick="window.location.href='atividades.html'" style="margin-right:8px;">Atividades coletivas</button>
+    <button onclick="window.location.href='registro.html'" style="margin-right:8px;">Planilha</button>
+    <button onclick="window.location.href='admin-tipos.html'" style="margin-right:8px;">Tipos de registro</button>
+    <button onclick="window.location.href='importar-anamneses.html'" style="margin-right:8px;">Importar</button>
+    <button onclick="sair()">Sair</button>
+  </div>
+</div>
+
+<div class="container">
+  <div class="card">
+    <h2>Registro de atendimentos e atividades</h2>
+    <p class="hint" style="margin-bottom:12px;">A lista se monta sozinha a cada atendimento individual e atividade coletiva registrados. Filtre por mês ou por dia e baixe quando quiser.</p>
+
+    <div class="filtros">
+      <div>
+        <label for="filtroMes">Mês</label>
+        <input type="month" id="filtroMes" onchange="aoMudarFiltro()">
+      </div>
+      <div>
+        <label for="filtroDia">Dia (opcional)</label>
+        <input type="date" id="filtroDia" onchange="aoMudarFiltro()">
+      </div>
+      <div>
+        <label for="filtroTipo">Tipo</label>
+        <select id="filtroTipo" onchange="aoMudarFiltro()">
+          <option value="">Individual e grupo</option>
+          <option value="Individual">Só individual</option>
+          <option value="Grupo">Só grupo</option>
+        </select>
+      </div>
+      <div>
+        <label for="filtroResp">Responsável</label>
+        <select id="filtroResp" onchange="aoMudarFiltro()">
+          <option value="">Todos</option>
+          <option value="meus">Só os meus</option>
+          <option value="colega">Só do colega</option>
+        </select>
+      </div>
+      <div>
+        <label for="filtroCat">Categoria</label>
+        <select id="filtroCat" onchange="aoMudarFiltro()">
+          <option value="">Todas</option>
+        </select>
+      </div>
+      <div>
+        <label for="filtroBusca">Buscar (atleta ou tema)</label>
+        <input type="text" id="filtroBusca" placeholder="Digite para buscar..." oninput="aoMudarFiltro()">
+      </div>
+    </div>
+
+    <div style="display:flex; flex-wrap:wrap; gap:8px;">
+      <button class="btn btn-outline" style="font-size:12px;" onclick="mostrarTodosPeriodos()">Ver todos os meses</button>
+      <button class="btn btn-outline" style="font-size:12px;" onclick="irParaMesAtual()">Mês atual</button>
+    </div>
+
+    <p id="contagem" class="hint" style="margin-top:12px;"></p>
+    <div class="tabela-wrap">
+      <table class="planilha">
+        <thead>
+          <tr>
+            <th>Data</th><th>Atleta</th><th>Categoria</th><th>Tipo de Atendimento</th>
+            <th>Tema / Motivo</th><th>Observações</th><th>Encaminhamentos / Próximos Passos</th><th>Responsável</th>
+          </tr>
+        </thead>
+        <tbody id="corpo"></tbody>
+      </table>
+    </div>
+
+    <div class="acoes-download">
+      <button class="btn btn-gold" onclick="baixarExcel()">Baixar Excel (.xlsx)</button>
+      <button class="btn btn-outline" onclick="baixarCSV()">Baixar CSV</button>
+    </div>
+    <p class="nota-sigilo">O arquivo baixado leva exatamente o que está na tabela, inclusive o conteúdo dos seus atendimentos. Guarde-o em local seguro e não envie por canais abertos. Atendimentos privados do colega aparecem sem o conteúdo.</p>
+  </div>
+</div>
+
+<script type="module">
+import { firebaseConfig } from "./firebase-config.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, collection, doc, getDoc, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+const CATEGORIAS_PADRAO = ["Sub-9", "Sub-10", "Sub-11", "Sub-12", "Sub-13", "Sub-14", "Sub-15", "Sub-17", "Sub-20"];
+const CABECALHO = ["Data", "Atleta", "Categoria", "Tipo de Atendimento", "Tema / Motivo", "Observações", "Encaminhamentos / Próximos Passos", "Responsável"];
+
+let usuarioAtual = null;
+let atletasPorId = {};
+let atendimentos = [];
+let atividades = [];
+const cacheConteudo = new Map();
+let linhasAtuais = [];
+let tokenRender = 0;
+
+onAuthStateChanged(auth, async (user) => {
+  if (!user) { window.location.href = "index.html"; return; }
+  usuarioAtual = user;
+  document.getElementById("filtroMes").value = mesAtualStr();
+  await carregarTudo();
+});
+
+window.sair = function () { signOut(auth).then(() => window.location.href = "index.html"); };
+
+function mesAtualStr() {
+  const h = new Date();
+  return `${h.getFullYear()}-${String(h.getMonth() + 1).padStart(2, "0")}`;
+}
+
+async function carregarTudo() {
+  const snapAt = await getDocs(collection(db, "atletas"));
+  atletasPorId = {};
+  snapAt.docs.forEach(d => { atletasPorId[d.id] = { id: d.id, ...d.data() }; });
+
+  const snapMeta = await getDocs(query(collection(db, "atendimentos_meta"), orderBy("data", "asc")));
+  atendimentos = snapMeta.docs.map(d => ({ id: d.id, ...d.data() }));
+
+  try {
+    const snapCol = await getDocs(query(collection(db, "atividades_coletivas"), orderBy("data", "asc")));
+    atividades = snapCol.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    console.warn("Atividades coletivas indisponíveis", err);
+    atividades = [];
+  }
+
+  montarFiltroCategoria();
+  await renderTabela();
+}
+
+function montarFiltroCategoria() {
+  const sel = document.getElementById("filtroCat");
+  const atual = sel.value;
+  const todas = new Set(CATEGORIAS_PADRAO);
+  Object.values(atletasPorId).forEach(a => { if (a.categoria) todas.add(a.categoria); });
+  atividades.forEach(a => (a.categorias || []).forEach(c => todas.add(c)));
+  sel.innerHTML = '<option value="">Todas</option>' + [...todas].map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
+  sel.value = [...todas].includes(atual) ? atual : "";
+}
+
+window.aoMudarFiltro = function () { renderTabela(); };
+
+window.mostrarTodosPeriodos = function () {
+  document.getElementById("filtroMes").value = "";
+  document.getElementById("filtroDia").value = "";
+  renderTabela();
+};
+
+window.irParaMesAtual = function () {
+  document.getElementById("filtroMes").value = mesAtualStr();
+  document.getElementById("filtroDia").value = "";
+  renderTabela();
+};
+
+function passaPeriodo(data) {
+  const dia = document.getElementById("filtroDia").value;
+  const mes = document.getElementById("filtroMes").value;
+  if (dia) return data === dia;
+  if (mes) return (data || "").startsWith(mes);
+  return true;
+}
+
+// Observações / encaminhamentos de um atendimento individual, respeitando a privacidade
+async function obterConteudo(a) {
+  if (cacheConteudo.has(a.id)) return cacheConteudo.get(a.id);
+  let r;
+  const meu = a.autorUid === usuarioAtual.uid;
+  if (meu || a.visibilidade === "compartilhada") {
+    try {
+      const snap = await getDoc(doc(db, "atendimentos_conteudo", a.id));
+      const d = snap.exists() ? snap.data() : {};
+      r = { obs: d.conteudo || "", enc: d.encaminhamentos || "", privado: false };
+    } catch (err) {
+      r = { obs: "Conteúdo indisponível para você.", enc: "", privado: true };
+    }
+  } else if (a.visibilidade === "mista") {
+    r = { obs: a.notaVisivelColega || "Conteúdo privado.", enc: "", privado: !a.notaVisivelColega };
+  } else {
+    r = { obs: "Conteúdo privado.", enc: "", privado: true };
+  }
+  cacheConteudo.set(a.id, r);
+  return r;
+}
+
+async function renderTabela() {
+  const meuToken = ++tokenRender;
+  const tipo = document.getElementById("filtroTipo").value;
+  const resp = document.getElementById("filtroResp").value;
+  const cat = document.getElementById("filtroCat").value;
+  const busca = norm(document.getElementById("filtroBusca").value);
+
+  const passaResp = (uid) => resp === "meus" ? uid === usuarioAtual.uid : resp === "colega" ? uid !== usuarioAtual.uid : true;
+
+  // atendimentos individuais
+  let ind = tipo === "Grupo" ? [] : atendimentos.filter(a => passaPeriodo(a.data) && passaResp(a.autorUid));
+  ind = ind.filter(a => {
+    const atleta = atletasPorId[a.atletaId] || {};
+    if (cat && atleta.categoria !== cat) return false;
+    if (busca && !norm(a.atletaNome).includes(busca) && !norm(a.motivo).includes(busca)) return false;
+    return true;
+  });
+
+  // atividades coletivas
+  let grp = tipo === "Individual" ? [] : atividades.filter(c => passaPeriodo(c.data) && passaResp(c.autorUid));
+  grp = grp.filter(c => {
+    if (cat && !(c.categorias || []).includes(cat)) return false;
+    if (busca && !norm(c.tema).includes(busca)) return false;
+    return true;
+  });
+
+  const conteudos = await Promise.all(ind.map(a => obterConteudo(a)));
+  if (meuToken !== tokenRender) return; // chegou um filtro mais novo
+
+  const linhas = [];
+  ind.forEach((a, i) => {
+    const atleta = atletasPorId[a.atletaId] || {};
+    linhas.push({
+      data: a.data || "", atleta: a.atletaNome || "—", categoria: atleta.categoria || "—",
+      tipo: "Individual", tema: a.motivo || "—",
+      obs: conteudos[i].obs || "—", enc: conteudos[i].enc || "—",
+      resp: a.assinatura || "—", privado: conteudos[i].privado, ordem: a.criadoEm || ""
+    });
+  });
+  grp.forEach(c => {
+    linhas.push({
+      data: c.data || "", atleta: "—", categoria: (c.categorias || []).join(", ") || "—",
+      tipo: "Grupo", tema: c.tema || "—",
+      obs: c.observacoes || "—", enc: c.encaminhamentos || "—",
+      resp: c.assinatura || "—", privado: false, ordem: c.criadoEm || ""
+    });
+  });
+  linhas.sort((x, y) => (x.data + x.ordem).localeCompare(y.data + y.ordem));
+  linhasAtuais = linhas;
+
+  const corpo = document.getElementById("corpo");
+  corpo.innerHTML = "";
+  linhas.forEach(l => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="data">${fmtData(l.data)}</td>
+      <td>${esc(l.atleta)}</td>
+      <td>${esc(l.categoria)}</td>
+      <td>${esc(l.tipo)}</td>
+      <td>${esc(l.tema)}</td>
+      <td class="obs ${l.privado ? "priv" : ""}">${esc(l.obs)}</td>
+      <td class="obs">${esc(l.enc)}</td>
+      <td>${esc(l.resp)}</td>`;
+    corpo.appendChild(tr);
+  });
+
+  const nInd = linhas.filter(l => l.tipo === "Individual").length;
+  const nGrp = linhas.length - nInd;
+  document.getElementById("contagem").textContent = linhas.length === 0
+    ? "Nenhum registro neste filtro."
+    : `${linhas.length} registro(s): ${nInd} individual(is) e ${nGrp} de grupo.`;
+}
+
+// ---------- download ----------
+function linhaParaArray(l) {
+  return [fmtData(l.data), l.atleta, l.categoria, l.tipo, l.tema, l.obs, l.enc, l.resp];
+}
+
+function nomeArquivo(ext) {
+  const dia = document.getElementById("filtroDia").value;
+  const mes = document.getElementById("filtroMes").value;
+  return `registro-atendimentos-${dia || mes || "todos-os-meses"}.${ext}`;
+}
+
+function baixarBlob(blob, nome) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nome;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+window.baixarCSV = function () {
+  const aspas = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const linhas = [CABECALHO, ...linhasAtuais.map(linhaParaArray)].map(r => r.map(aspas).join(";"));
+  const conteudo = "\uFEFF" + linhas.join("\r\n");
+  baixarBlob(new Blob([conteudo], { type: "text/csv;charset=utf-8" }), nomeArquivo("csv"));
+};
+
+window.baixarExcel = function () {
+  if (!window.XLSX) {
+    alert("Não consegui carregar o gerador de Excel (sem internet?). Vou baixar em CSV, que o Excel também abre.");
+    return baixarCSV();
+  }
+  const aoa = [CABECALHO, ...linhasAtuais.map(linhaParaArray)];
+  const ws = window.XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = [{ wch: 12 }, { wch: 30 }, { wch: 14 }, { wch: 18 }, { wch: 30 }, { wch: 60 }, { wch: 40 }, { wch: 18 }];
+  ws["!autofilter"] = { ref: `A1:H${aoa.length}` };
+  const wb = window.XLSX.utils.book_new();
+  window.XLSX.utils.book_append_sheet(wb, ws, "Registros");
+  const buf = window.XLSX.write(wb, { bookType: "xlsx", type: "array" });
+  baixarBlob(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), nomeArquivo("xlsx"));
+};
+
+// ---------- utilidades ----------
+function fmtData(iso) {
+  const [y, m, d] = (iso || "").split("-");
+  return y ? `${d}/${m}/${y}` : "";
+}
+function norm(txt) {
+  return String(txt || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+}
+function esc(str) {
+  return String(str ?? "").replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+}
+</script>
+
+</body>
+</html>

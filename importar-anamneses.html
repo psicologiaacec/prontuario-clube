@@ -14,6 +14,7 @@
     <button onclick="window.location.href='atletas.html'" style="margin-right:8px;">Atletas</button>
     <button onclick="window.location.href='atendimentos.html'" style="margin-right:8px;">Atendimentos</button>
     <button onclick="window.location.href='atividades.html'" style="margin-right:8px;">Atividades coletivas</button>
+    <button onclick="window.location.href='registro.html'" style="margin-right:8px;">Planilha</button>
     <button onclick="window.location.href='admin-tipos.html'" style="margin-right:8px;">Tipos de registro</button>
     <button onclick="sair()">Sair</button>
   </div>
@@ -46,6 +47,10 @@ import { getFirestore, collection, addDoc, getDocs, doc, getDoc, setDoc, serverT
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+
+function normalizarNome(txt) {
+  return String(txt || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+}
 
 let usuarioAtual = null;
 let linhasProcessadas = [];
@@ -137,7 +142,7 @@ window.processarArquivo = async function () {
 
   linhasProcessadas = linhas.slice(1).filter(l => l[idxNome] && l[idxNome].trim()).map(l => {
     const nome = l[idxNome].trim();
-    const existente = atletasExistentes.find(a => (a.nome || "").trim().toLowerCase() === nome.toLowerCase());
+    const existente = atletasExistentes.find(a => normalizarNome(a.nome) === normalizarNome(nome));
     const brutoBlocos = headers.map((h, i) => l[i] ? `${h}: ${l[i]}` : null).filter(Boolean).join("\n\n");
     return {
       nome,

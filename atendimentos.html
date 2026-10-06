@@ -25,6 +25,7 @@
     <button onclick="window.location.href='atletas.html'" style="margin-right:8px;">Atletas</button>
     <button onclick="window.location.href='atendimentos.html'" style="margin-right:8px;">Atendimentos</button>
     <button onclick="window.location.href='atividades.html'" style="margin-right:8px;">Atividades coletivas</button>
+    <button onclick="window.location.href='registro.html'" style="margin-right:8px;">Planilha</button>
     <button onclick="window.location.href='admin-tipos.html'" style="margin-right:8px;">Tipos de registro</button>
     <button onclick="window.location.href='importar-anamneses.html'" style="margin-right:8px;">Importar</button>
     <button onclick="sair()">Sair</button>
@@ -33,7 +34,8 @@
 
 <div class="container">
   <div class="card">
-    <h2>Novo atendimento</h2>
+    <h2 id="tituloFormAtendimento">Novo atendimento</h2>
+    <p id="avisoEdicaoAtendimento" class="hint" style="display:none;"></p>
     <label for="assinaturaNovo">Assinatura (nome do profissional)</label>
     <input type="text" id="assinaturaNovo" placeholder="Seu nome completo">
 
@@ -50,6 +52,20 @@
       </div>
     </div>
 
+    <label for="motivoSelect">Motivo / tipo do atendimento</label>
+    <select id="motivoSelect" onchange="aoMudarMotivo()">
+      <option value="">Selecione...</option>
+      <option>Solicitação do atleta</option>
+      <option>Acolhimento</option>
+      <option>Escuta ativa</option>
+      <option>Intervenção</option>
+      <option>Continuação do acompanhamento</option>
+      <option>Acompanhamento em lesão</option>
+      <option>Outro (digitar)</option>
+    </select>
+    <input type="text" id="motivoOutro" placeholder="Digite o motivo" style="display:none; margin-top:6px;">
+    <p class="hint">O motivo fica visível ao colega: não escreva aqui o conteúdo da sessão.</p>
+
     <label>Visibilidade deste atendimento</label>
     <div class="subtab-bar" id="visBar">
       <button class="subtab-btn active" data-v="privada" onclick="escolherVis('privada')">Privada</button>
@@ -61,12 +77,17 @@
     <label for="conteudoAtendimento">Conteúdo da sessão</label>
     <textarea id="conteudoAtendimento" style="min-height:100px;"></textarea>
 
+    <label for="encAtendimento">Encaminhamentos / próximos passos (opcional)</label>
+    <textarea id="encAtendimento" style="min-height:60px;"></textarea>
+    <p class="hint">Segue a mesma privacidade do conteúdo da sessão.</p>
+
     <div id="notaMistaWrap" style="display:none;">
       <label for="notaVisivelColega">Nota visível ao colega (resumo curto, opcional)</label>
       <input type="text" id="notaVisivelColega" placeholder="Ex.: acompanhar ansiedade pré-jogo">
     </div>
 
-    <button class="btn btn-gold" style="margin-top:14px;" onclick="salvarAtendimento()">Salvar atendimento</button>
+    <button class="btn btn-gold" id="btnSalvarAtendimento" style="margin-top:14px;" onclick="salvarAtendimento()">Salvar atendimento</button>
+    <button class="btn btn-outline" id="btnCancelarEdicaoAtendimento" style="margin-top:14px; margin-left:8px; display:none;" onclick="cancelarEdicaoAtendimento()">Cancelar edição</button>
     <p id="erroNovo" class="error-msg" style="display:none;"></p>
     <p id="okNovo" style="color:#3B6D11; font-size:13px; margin-top:6px; display:none;"></p>
   </div>
@@ -113,7 +134,7 @@
 import { firebaseConfig } from "./firebase-config.js";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, collection, doc, getDoc, setDoc, deleteDoc, getDocs, query, where, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, collection, doc, getDoc, setDoc, updateDoc, deleteDoc, getDocs, query, where, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -130,6 +151,11 @@ let atletaConsultaSelecionado = null;
 let todosAtendimentos = [];
 let todasAtividades = [];
 let filtroTipo = "todos";
+let editandoAtendimentoId = null;
+let editandoTinhaMotivo = false;
+
+const MOTIVO_OUTRO = "Outro (digitar)";
+const MOTIVOS = ["Solicitação do atleta", "Acolhimento", "Escuta ativa", "Intervenção", "Continuação do acompanhamento", "Acompanhamento em lesão"];
 
 onAuthStateChanged(auth, async (user) => {
   if (!user) { window.location.href = "index.html"; return; }
@@ -210,10 +236,43 @@ window.salvarAtendimento = async function () {
   const data = document.getElementById("dataAtendimento").value;
   const conteudo = document.getElementById("conteudoAtendimento").value.trim();
   const notaVisivelColega = document.getElementById("notaVisivelColega").value.trim();
+  const encaminhamentos = document.getElementById("encAtendimento").value.trim();
+  const { motivoOpcao, motivo } = lerMotivo();
+  const motivoObrigatorio = !editandoAtendimentoId || editandoTinhaMotivo;
 
-  if (!assinatura || !atletaId || !data || !conteudo) {
-    erroEl.textContent = "Preencha assinatura, atleta, data e conteúdo antes de salvar.";
+  if (!assinatura || !atletaId || !data || !conteudo || (motivoObrigatorio && !motivo)) {
+    erroEl.textContent = "Preencha assinatura, atleta, data, motivo e conteúdo antes de salvar.";
     erroEl.style.display = "block";
+    return;
+  }
+
+  if (editandoAtendimentoId) {
+    const editId = editandoAtendimentoId;
+    const agora = new Date().toISOString();
+    try {
+    await updateDoc(doc(db, "atendimentos_meta", editId), {
+      atletaId, atletaNome, data, assinatura,
+      visibilidade: visibilidadeEscolhida,
+      notaVisivelColega: visibilidadeEscolhida === "mista" ? notaVisivelColega : "",
+      motivo, motivoOpcao,
+      editadoEm: agora
+    });
+    await setDoc(doc(db, "atendimentos_conteudo", editId), {
+      conteudo,
+      encaminhamentos,
+      autorUid: usuarioAtual.uid,
+      editadoEm: agora
+    }, { merge: true });
+    } catch (err) {
+      console.error(err);
+      erroEl.textContent = "Não foi possível salvar a alteração. Confira se as regras do Firestore permitem a edição pelo autor. Nada foi perdido: o registro continua como estava.";
+      erroEl.style.display = "block";
+      return;
+    }
+    sairModoEdicaoAtendimento();
+    okEl.textContent = "Alterações salvas.";
+    okEl.style.display = "block";
+    await carregarAtendimentos();
     return;
   }
 
@@ -224,11 +283,13 @@ window.salvarAtendimento = async function () {
     autorUid: usuarioAtual.uid,
     visibilidade: visibilidadeEscolhida,
     notaVisivelColega: visibilidadeEscolhida === "mista" ? notaVisivelColega : "",
+    motivo, motivoOpcao,
     criadoEm: new Date().toISOString()
   });
 
   await setDoc(doc(db, "atendimentos_conteudo", id), {
     conteudo,
+    encaminhamentos,
     autorUid: usuarioAtual.uid
   });
 
@@ -238,9 +299,97 @@ window.salvarAtendimento = async function () {
   document.getElementById("atletaSelecionadoNome").textContent = "";
   document.getElementById("dataAtendimento").value = "";
   document.getElementById("conteudoAtendimento").value = "";
+  document.getElementById("encAtendimento").value = "";
   document.getElementById("notaVisivelColega").value = "";
+  limparMotivo();
   await carregarAtendimentos();
 };
+
+// ---- Motivo do atendimento ----
+window.aoMudarMotivo = function () {
+  const sel = document.getElementById("motivoSelect").value;
+  document.getElementById("motivoOutro").style.display = sel === MOTIVO_OUTRO ? "block" : "none";
+};
+
+function lerMotivo() {
+  const sel = document.getElementById("motivoSelect").value;
+  if (!sel) return { motivoOpcao: "", motivo: "" };
+  if (sel === MOTIVO_OUTRO) return { motivoOpcao: sel, motivo: document.getElementById("motivoOutro").value.trim() };
+  return { motivoOpcao: sel, motivo: sel };
+}
+
+function preencherMotivo(a) {
+  const opcao = a.motivoOpcao || (MOTIVOS.includes(a.motivo) ? a.motivo : (a.motivo ? MOTIVO_OUTRO : ""));
+  document.getElementById("motivoSelect").value = opcao;
+  document.getElementById("motivoOutro").value = opcao === MOTIVO_OUTRO ? (a.motivo || "") : "";
+  aoMudarMotivo();
+}
+
+function limparMotivo() {
+  document.getElementById("motivoSelect").value = "";
+  document.getElementById("motivoOutro").value = "";
+  aoMudarMotivo();
+}
+
+// ---- Edição de atendimento (somente quem assinou) ----
+window.iniciarEdicaoAtendimento = async function (a) {
+  if (a.autorUid !== usuarioAtual.uid) return;
+  let conteudo = "";
+  let encaminhamentos = "";
+  try {
+    const snap = await getDoc(doc(db, "atendimentos_conteudo", a.id));
+    conteudo = snap.exists() ? (snap.data().conteudo || "") : "";
+    encaminhamentos = snap.exists() ? (snap.data().encaminhamentos || "") : "";
+  } catch (err) {
+    alert("Não foi possível carregar o conteúdo deste atendimento para edição. Nada foi alterado.");
+    return;
+  }
+  editandoAtendimentoId = a.id;
+  document.getElementById("tituloFormAtendimento").textContent = "Editar atendimento";
+  const aviso = document.getElementById("avisoEdicaoAtendimento");
+  aviso.textContent = "Você está editando um atendimento já salvo. Para trocar o atleta, busque o nome dele abaixo.";
+  aviso.style.display = "block";
+  document.getElementById("assinaturaNovo").value = a.assinatura || "";
+  document.getElementById("atletaSelecionadoId").value = a.atletaId || "";
+  document.getElementById("atletaSelecionadoNome").textContent = `Selecionado: ${a.atletaNome || ""}`;
+  document.getElementById("dataAtendimento").value = a.data || "";
+  document.getElementById("conteudoAtendimento").value = conteudo;
+  document.getElementById("encAtendimento").value = encaminhamentos;
+  editandoTinhaMotivo = !!a.motivo;
+  preencherMotivo(a);
+  document.getElementById("notaVisivelColega").value = a.notaVisivelColega || "";
+  escolherVis(a.visibilidade || "privada");
+  document.getElementById("btnSalvarAtendimento").textContent = "Salvar alterações";
+  document.getElementById("btnCancelarEdicaoAtendimento").style.display = "inline-block";
+  document.getElementById("erroNovo").style.display = "none";
+  document.getElementById("okNovo").style.display = "none";
+  window.scrollTo({ top: 0, behavior: "smooth" });
+};
+
+function sairModoEdicaoAtendimento() {
+  editandoAtendimentoId = null;
+  document.getElementById("tituloFormAtendimento").textContent = "Novo atendimento";
+  document.getElementById("avisoEdicaoAtendimento").style.display = "none";
+  document.getElementById("btnSalvarAtendimento").textContent = "Salvar atendimento";
+  document.getElementById("btnCancelarEdicaoAtendimento").style.display = "none";
+  document.getElementById("atletaSelecionadoId").value = "";
+  document.getElementById("atletaSelecionadoNome").textContent = "";
+  document.getElementById("dataAtendimento").value = "";
+  document.getElementById("conteudoAtendimento").value = "";
+  document.getElementById("encAtendimento").value = "";
+  document.getElementById("notaVisivelColega").value = "";
+  editandoTinhaMotivo = false;
+  limparMotivo();
+  escolherVis("privada");
+}
+
+window.cancelarEdicaoAtendimento = function () {
+  sairModoEdicaoAtendimento();
+};
+
+function editadoHint(x) {
+  return x && x.editadoEm ? ` <span class="hint">· editado em ${new Date(x.editadoEm).toLocaleDateString("pt-BR")}</span>` : "";
+}
 
 // ---- Consulta ----
 window.mudarModo = function (m) {
@@ -381,13 +530,15 @@ function renderResultado() {
     const notaHtml = a.visibilidade === "mista" && a.notaVisivelColega
       ? `<div style="font-size:12px; color:#5F5E5A; margin-top:4px;">📝 ${esc(a.notaVisivelColega)}</div>` : "";
     const podeExcluir = a.autorUid === usuarioAtual.uid;
+    const editarBtn = podeExcluir ? `<button class="btn btn-outline" style="font-size:11px; padding:3px 8px; margin-left:8px;" data-editar="${a.id}">Editar</button>` : "";
     const excluirBtn = podeExcluir ? `<button class="btn btn-outline" style="font-size:11px; padding:3px 8px; margin-left:8px;" data-excluir="${a.id}">Excluir</button>` : "";
     row.innerHTML = `
       <div class="meta">
         <a href="#" class="ver-historico" data-id="${a.atletaId}" data-nome="${escAttr(a.atletaNome)}" style="color:#304E38; font-weight:600; text-decoration:underline;">${esc(a.atletaNome)}</a>
-        · ${dataFmt} · ${esc(a.assinatura)}
+        · ${dataFmt} · ${esc(a.assinatura)}${editadoHint(a)}
+        ${a.motivo ? `<span class="pill pill-gold" style="margin-left:6px;">${esc(a.motivo)}</span>` : ""}
         <span class="pill pill-outline" style="margin-left:6px;">${esc(a.visibilidade)}</span>
-        ${excluirBtn}
+        ${editarBtn}${excluirBtn}
       </div>
       ${notaHtml}
       <button class="btn btn-outline no-print" style="font-size:11px; padding:3px 8px; margin-top:6px;" data-vercont="${a.id}">Ver conteúdo</button>
@@ -397,6 +548,9 @@ function renderResultado() {
       e.preventDefault();
       abrirHistoricoAtleta(a.atletaId, a.atletaNome);
     });
+    if (podeExcluir) {
+      row.querySelector("[data-editar]").addEventListener("click", () => iniciarEdicaoAtendimento(a));
+    }
     if (podeExcluir) {
       row.querySelector("[data-excluir]").addEventListener("click", async () => {
         if (!confirm("Excluir este atendimento? Essa ação não pode ser desfeita.")) return;
@@ -443,11 +597,14 @@ function criarLinhaColetiva(c) {
   const partHtml = c.participantes ? `<span class="hint"> · ${esc(c.participantes)} participante(s)</span>` : "";
   const encHtml = c.encaminhamentos
     ? `<div style="font-size:13px; color:#304E38; margin-top:6px;"><strong>Próximos passos:</strong> ${esc(c.encaminhamentos)}</div>` : "";
+  const editarCol = c.autorUid === usuarioAtual.uid
+    ? `<button class="btn btn-outline" style="font-size:11px; padding:3px 8px; margin-left:8px;" onclick="window.location.href='atividades.html?editar=${encodeURIComponent(c.id)}'">Editar</button>` : "";
   row.innerHTML = `
     <div class="meta">
       <span class="pill pill-gold">Coletiva</span>
       <strong style="color:#304E38; margin-left:6px;">${esc(c.tema)}</strong>
-      · ${dataFmt} · ${esc(c.assinatura)}
+      · ${dataFmt} · ${esc(c.assinatura)}${editadoHint(c)}
+      ${editarCol}
     </div>
     <div style="margin-top:6px;">${cats}${formatoHtml}${partHtml}</div>
     <div style="font-size:13px; color:#304E38; background:#FCFBF7; border-radius:8px; padding:8px 10px; margin-top:8px; white-space:pre-wrap;">${esc(c.observacoes)}</div>
