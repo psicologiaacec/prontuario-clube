@@ -41,9 +41,59 @@
 </div>
 
 <div class="container">
+
+  <div class="card">
+    <h2 id="tituloForm">Novo registro</h2>
+    <p class="hint" style="margin-bottom:10px;">Aqui entram só os dados básicos, para comprovar os atendimentos. O conteúdo das sessões fica na ficha do atleta e em Atendimentos, e nunca é puxado para esta planilha: tudo é preenchido por vocês.</p>
+    <p id="avisoEdicao" class="hint" style="display:none;"></p>
+
+    <div class="filtros">
+      <div>
+        <label for="rData">Data</label>
+        <input type="date" id="rData">
+      </div>
+      <div>
+        <label for="rTipo">Tipo de atendimento</label>
+        <select id="rTipo">
+          <option value="Individual">Individual</option>
+          <option value="Grupo">Grupo</option>
+        </select>
+      </div>
+      <div>
+        <label for="rResp">Responsável</label>
+        <input type="text" id="rResp" list="listaResp" placeholder="Nome do profissional" autocomplete="off">
+        <datalist id="listaResp"></datalist>
+      </div>
+    </div>
+
+    <div class="filtros">
+      <div style="flex: 2 1 260px;">
+        <label for="rAtleta">Atleta (deixe em branco se for grupo)</label>
+        <input type="text" id="rAtleta" list="listaAtletas" placeholder="Digite o nome" autocomplete="off">
+        <datalist id="listaAtletas"></datalist>
+      </div>
+      <div>
+        <label for="rCategoria">Categoria (opcional)</label>
+        <input type="text" id="rCategoria" list="listaCategorias" placeholder="Ex.: Sub-17" autocomplete="off">
+        <datalist id="listaCategorias"></datalist>
+      </div>
+    </div>
+
+    <label for="rTema">Tema / motivo</label>
+    <input type="text" id="rTema" list="listaTemas" placeholder="Escolha uma sugestão ou digite" autocomplete="off">
+    <datalist id="listaTemas"></datalist>
+
+    <label for="rObs">Observações</label>
+    <textarea id="rObs" style="min-height:70px;" placeholder="Só o necessário para comprovar o atendimento. Não escreva o conteúdo da sessão."></textarea>
+
+    <button class="btn btn-gold" id="btnSalvar" style="margin-top:14px;" onclick="salvarRegistro()">Salvar registro</button>
+    <button class="btn btn-outline" id="btnCancelarEdicao" style="margin-top:14px; margin-left:8px; display:none;" onclick="cancelarEdicao()">Cancelar edição</button>
+    <p id="erro" class="error-msg" style="display:none;"></p>
+    <p id="ok" style="color:#3B6D11; font-size:13px; margin-top:6px; display:none;"></p>
+  </div>
+
   <div class="card">
     <h2>Registro de atendimentos e atividades</h2>
-    <p class="hint" style="margin-bottom:12px;">A lista se monta sozinha a cada atendimento individual e atividade coletiva registrados. Filtre por mês ou por dia e baixe quando quiser.</p>
 
     <div class="filtros">
       <div>
@@ -65,9 +115,7 @@
       <div>
         <label for="filtroResp">Responsável</label>
         <select id="filtroResp" onchange="aoMudarFiltro()">
-          <option value="">Todos</option>
-          <option value="meus">Só os meus</option>
-          <option value="colega">Só do colega</option>
+          <option value="">Todos (os dois juntos)</option>
         </select>
       </div>
       <div>
@@ -93,7 +141,7 @@
         <thead>
           <tr>
             <th>Data</th><th>Atleta</th><th>Categoria</th><th>Tipo de Atendimento</th>
-            <th>Tema / Motivo</th><th>Observações</th><th>Encaminhamentos / Próximos Passos</th><th>Responsável</th>
+            <th>Tema / Motivo</th><th>Observações</th><th>Responsável</th><th></th>
           </tr>
         </thead>
         <tbody id="corpo"></tbody>
@@ -104,7 +152,7 @@
       <button class="btn btn-gold" onclick="baixarExcel()">Baixar Excel (.xlsx)</button>
       <button class="btn btn-outline" onclick="baixarCSV()">Baixar CSV</button>
     </div>
-    <p class="nota-sigilo">O arquivo baixado leva exatamente o que está na tabela, inclusive o conteúdo dos seus atendimentos. Guarde-o em local seguro e não envie por canais abertos. Atendimentos privados do colega aparecem sem o conteúdo.</p>
+    <p class="nota-sigilo">O arquivo baixado leva exatamente o que está na tabela, com o filtro aplicado. Mesmo sendo só dados básicos, guarde-o em local seguro.</p>
   </div>
 </div>
 
@@ -112,75 +160,103 @@
 import { firebaseConfig } from "./firebase-config.js";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, collection, doc, getDoc, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, collection, doc, getDocs, setDoc, updateDoc, deleteDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
+const COLECAO = "planilha_registros";
 const CATEGORIAS_PADRAO = ["Sub-9", "Sub-10", "Sub-11", "Sub-12", "Sub-13", "Sub-14", "Sub-15", "Sub-17", "Sub-20"];
-const CABECALHO = ["Data", "Atleta", "Categoria", "Tipo de Atendimento", "Tema / Motivo", "Observações", "Encaminhamentos / Próximos Passos", "Responsável"];
+const TEMAS_SUGERIDOS = ["Solicitação do atleta", "Acolhimento", "Escuta ativa", "Intervenção", "Continuação do acompanhamento", "Acompanhamento em lesão"];
+const CABECALHO = ["Data", "Atleta", "Categoria", "Tipo de Atendimento", "Tema / Motivo", "Observações", "Responsável"];
 
 let usuarioAtual = null;
-let atletasPorId = {};
-let atendimentos = [];
-let atividades = [];
-const cacheConteudo = new Map();
+let registros = [];
+let nomesAtletas = [];   // só para sugerir nomes ao digitar; nada é gravado a partir daqui
+let editandoId = null;
 let linhasAtuais = [];
-let tokenRender = 0;
 
 onAuthStateChanged(auth, async (user) => {
   if (!user) { window.location.href = "index.html"; return; }
   usuarioAtual = user;
   document.getElementById("filtroMes").value = mesAtualStr();
-  await carregarTudo();
+  document.getElementById("rData").value = hojeStr();
+  document.getElementById("listaTemas").innerHTML = TEMAS_SUGERIDOS.map(t => `<option value="${esc(t)}">`).join("");
+  await carregarSugestoesAtletas();
+  await carregarRegistros();
 });
 
 window.sair = function () { signOut(auth).then(() => window.location.href = "index.html"); };
 
-function mesAtualStr() {
+function hojeStr() {
   const h = new Date();
-  return `${h.getFullYear()}-${String(h.getMonth() + 1).padStart(2, "0")}`;
+  return `${h.getFullYear()}-${String(h.getMonth() + 1).padStart(2, "0")}-${String(h.getDate()).padStart(2, "0")}`;
 }
+function mesAtualStr() { return hojeStr().slice(0, 7); }
 
-async function carregarTudo() {
-  const snapAt = await getDocs(collection(db, "atletas"));
-  atletasPorId = {};
-  snapAt.docs.forEach(d => { atletasPorId[d.id] = { id: d.id, ...d.data() }; });
-
-  const snapMeta = await getDocs(query(collection(db, "atendimentos_meta"), orderBy("data", "asc")));
-  atendimentos = snapMeta.docs.map(d => ({ id: d.id, ...d.data() }));
-
+async function carregarSugestoesAtletas() {
   try {
-    const snapCol = await getDocs(query(collection(db, "atividades_coletivas"), orderBy("data", "asc")));
-    atividades = snapCol.docs.map(d => ({ id: d.id, ...d.data() }));
-  } catch (err) {
-    console.warn("Atividades coletivas indisponíveis", err);
-    atividades = [];
-  }
-
-  montarFiltroCategoria();
-  await renderTabela();
+    const snap = await getDocs(collection(db, "atletas"));
+    nomesAtletas = snap.docs.map(d => d.data().nome).filter(Boolean).sort((a, b) => a.localeCompare(b, "pt-BR"));
+  } catch (err) { nomesAtletas = []; }
+  document.getElementById("listaAtletas").innerHTML = nomesAtletas.map(n => `<option value="${esc(n)}">`).join("");
 }
 
-function montarFiltroCategoria() {
+async function carregarRegistros() {
+  try {
+    const snap = await getDocs(query(collection(db, COLECAO), orderBy("data", "asc")));
+    registros = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    console.warn(err);
+    registros = [];
+    document.getElementById("contagem").textContent = "Não foi possível carregar a planilha. Confira se as regras do Firestore foram atualizadas para a coleção planilha_registros.";
+    return;
+  }
+  montarSugestoes();
+  renderTabela();
+  // responsável: sugere o último nome que você usou
+  const respEl = document.getElementById("rResp");
+  if (!respEl.value) {
+    const minha = [...registros].reverse().find(r => r.autorUid === usuarioAtual.uid && r.responsavel);
+    if (minha) respEl.value = minha.responsavel;
+  }
+}
+
+function montarSugestoes() {
+  // um nome por pessoa, mesmo que tenha sido digitado com maiúsculas, acento ou espaços diferentes
+  const nomes = new Map();
+  registros.forEach(r => {
+    const k = chave(r.responsavel);
+    if (k && !nomes.has(k)) nomes.set(k, String(r.responsavel).trim().replace(/\s+/g, " "));
+  });
+  document.getElementById("listaResp").innerHTML = [...nomes.values()].map(n => `<option value="${esc(n)}">`).join("");
+  const selResp = document.getElementById("filtroResp");
+  const respAtual = selResp.value;
+  const ordenados = [...nomes.entries()].sort((a, b) => a[1].localeCompare(b[1], "pt-BR"));
+  selResp.innerHTML = '<option value="">Todos (os dois juntos)</option>' + ordenados.map(([k, n]) => `<option value="${esc(k)}">${esc(n)}</option>`).join("");
+  selResp.value = nomes.has(respAtual) ? respAtual : "";
+
+  const cats = new Set(CATEGORIAS_PADRAO);
+  registros.forEach(r => categoriasDe(r).forEach(c => cats.add(c)));
+  document.getElementById("listaCategorias").innerHTML = CATEGORIAS_PADRAO.map(c => `<option value="${esc(c)}">`).join("");
   const sel = document.getElementById("filtroCat");
   const atual = sel.value;
-  const todas = new Set(CATEGORIAS_PADRAO);
-  Object.values(atletasPorId).forEach(a => { if (a.categoria) todas.add(a.categoria); });
-  atividades.forEach(a => (a.categorias || []).forEach(c => todas.add(c)));
-  sel.innerHTML = '<option value="">Todas</option>' + [...todas].map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
-  sel.value = [...todas].includes(atual) ? atual : "";
+  sel.innerHTML = '<option value="">Todas</option>' + [...cats].map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
+  sel.value = [...cats].includes(atual) ? atual : "";
 }
 
-window.aoMudarFiltro = function () { renderTabela(); };
+function categoriasDe(r) {
+  return String(r.categoria || "").split(",").map(x => x.trim()).filter(Boolean);
+}
 
+// ---------- filtros ----------
+window.aoMudarFiltro = function () { renderTabela(); };
 window.mostrarTodosPeriodos = function () {
   document.getElementById("filtroMes").value = "";
   document.getElementById("filtroDia").value = "";
   renderTabela();
 };
-
 window.irParaMesAtual = function () {
   document.getElementById("filtroMes").value = mesAtualStr();
   document.getElementById("filtroDia").value = "";
@@ -195,110 +271,155 @@ function passaPeriodo(data) {
   return true;
 }
 
-// Observações / encaminhamentos de um atendimento individual, respeitando a privacidade
-async function obterConteudo(a) {
-  if (cacheConteudo.has(a.id)) return cacheConteudo.get(a.id);
-  let r;
-  const meu = a.autorUid === usuarioAtual.uid;
-  if (meu || a.visibilidade === "compartilhada") {
-    try {
-      const snap = await getDoc(doc(db, "atendimentos_conteudo", a.id));
-      const d = snap.exists() ? snap.data() : {};
-      r = { obs: d.conteudo || "", enc: d.encaminhamentos || "", privado: false };
-    } catch (err) {
-      r = { obs: "Conteúdo indisponível para você.", enc: "", privado: true };
-    }
-  } else if (a.visibilidade === "mista") {
-    r = { obs: a.notaVisivelColega || "Conteúdo privado.", enc: "", privado: !a.notaVisivelColega };
-  } else {
-    r = { obs: "Conteúdo privado.", enc: "", privado: true };
-  }
-  cacheConteudo.set(a.id, r);
-  return r;
-}
-
-async function renderTabela() {
-  const meuToken = ++tokenRender;
+function renderTabela() {
   const tipo = document.getElementById("filtroTipo").value;
   const resp = document.getElementById("filtroResp").value;
   const cat = document.getElementById("filtroCat").value;
   const busca = norm(document.getElementById("filtroBusca").value);
 
-  const passaResp = (uid) => resp === "meus" ? uid === usuarioAtual.uid : resp === "colega" ? uid !== usuarioAtual.uid : true;
-
-  // atendimentos individuais
-  let ind = tipo === "Grupo" ? [] : atendimentos.filter(a => passaPeriodo(a.data) && passaResp(a.autorUid));
-  ind = ind.filter(a => {
-    const atleta = atletasPorId[a.atletaId] || {};
-    if (cat && atleta.categoria !== cat) return false;
-    if (busca && !norm(a.atletaNome).includes(busca) && !norm(a.motivo).includes(busca)) return false;
+  const linhas = registros.filter(r => {
+    if (!passaPeriodo(r.data)) return false;
+    if (tipo && r.tipo !== tipo) return false;
+    if (resp && chave(r.responsavel) !== resp) return false;
+    if (cat && !categoriasDe(r).includes(cat)) return false;
+    if (busca && !norm(r.atleta).includes(busca) && !norm(r.tema).includes(busca)) return false;
     return true;
   });
-
-  // atividades coletivas
-  let grp = tipo === "Individual" ? [] : atividades.filter(c => passaPeriodo(c.data) && passaResp(c.autorUid));
-  grp = grp.filter(c => {
-    if (cat && !(c.categorias || []).includes(cat)) return false;
-    if (busca && !norm(c.tema).includes(busca)) return false;
-    return true;
-  });
-
-  const conteudos = await Promise.all(ind.map(a => obterConteudo(a)));
-  if (meuToken !== tokenRender) return; // chegou um filtro mais novo
-
-  const linhas = [];
-  ind.forEach((a, i) => {
-    const atleta = atletasPorId[a.atletaId] || {};
-    linhas.push({
-      data: a.data || "", atleta: a.atletaNome || "—", categoria: atleta.categoria || "—",
-      tipo: "Individual", tema: a.motivo || "—",
-      obs: conteudos[i].obs || "—", enc: conteudos[i].enc || "—",
-      resp: a.assinatura || "—", privado: conteudos[i].privado, ordem: a.criadoEm || ""
-    });
-  });
-  grp.forEach(c => {
-    linhas.push({
-      data: c.data || "", atleta: "—", categoria: (c.categorias || []).join(", ") || "—",
-      tipo: "Grupo", tema: c.tema || "—",
-      obs: c.observacoes || "—", enc: c.encaminhamentos || "—",
-      resp: c.assinatura || "—", privado: false, ordem: c.criadoEm || ""
-    });
-  });
-  linhas.sort((x, y) => (x.data + x.ordem).localeCompare(y.data + y.ordem));
+  linhas.sort((x, y) => ((x.data || "") + (x.criadoEm || "")).localeCompare((y.data || "") + (y.criadoEm || "")));
   linhasAtuais = linhas;
 
   const corpo = document.getElementById("corpo");
   corpo.innerHTML = "";
-  linhas.forEach(l => {
+  linhas.forEach(r => {
     const tr = document.createElement("tr");
+    const meu = r.autorUid === usuarioAtual.uid;
+    const editadoHint = r.editadoEm ? `<br><span class="hint">editado em ${new Date(r.editadoEm).toLocaleDateString("pt-BR")}</span>` : "";
     tr.innerHTML = `
-      <td class="data">${fmtData(l.data)}</td>
-      <td>${esc(l.atleta)}</td>
-      <td>${esc(l.categoria)}</td>
-      <td>${esc(l.tipo)}</td>
-      <td>${esc(l.tema)}</td>
-      <td class="obs ${l.privado ? "priv" : ""}">${esc(l.obs)}</td>
-      <td class="obs">${esc(l.enc)}</td>
-      <td>${esc(l.resp)}</td>`;
+      <td class="data">${fmtData(r.data)}${editadoHint}</td>
+      <td>${esc(r.atleta || "—")}</td>
+      <td>${esc(r.categoria || "—")}</td>
+      <td>${esc(r.tipo || "—")}</td>
+      <td>${esc(r.tema || "—")}</td>
+      <td class="obs">${esc(r.observacoes || "—")}</td>
+      <td>${esc(r.responsavel || "—")}</td>
+      <td style="white-space:nowrap;">${meu ? `<button class="btn btn-outline" style="font-size:11px; padding:3px 8px;" data-editar="${esc(r.id)}">Editar</button> <button class="btn btn-outline" style="font-size:11px; padding:3px 8px;" data-excluir="${esc(r.id)}">Excluir</button>` : ""}</td>`;
+    if (meu) {
+      tr.querySelector("[data-editar]").addEventListener("click", () => iniciarEdicao(r));
+      tr.querySelector("[data-excluir]").addEventListener("click", () => excluirRegistro(r));
+    }
     corpo.appendChild(tr);
   });
 
   const nInd = linhas.filter(l => l.tipo === "Individual").length;
-  const nGrp = linhas.length - nInd;
   document.getElementById("contagem").textContent = linhas.length === 0
     ? "Nenhum registro neste filtro."
-    : `${linhas.length} registro(s): ${nInd} individual(is) e ${nGrp} de grupo.`;
+    : `${linhas.length} registro(s): ${nInd} individual(is) e ${linhas.length - nInd} de grupo.`;
+}
+
+// ---------- cadastro manual ----------
+window.salvarRegistro = async function () {
+  const erroEl = document.getElementById("erro");
+  const okEl = document.getElementById("ok");
+  erroEl.style.display = "none";
+  okEl.style.display = "none";
+
+  const dados = {
+    data: document.getElementById("rData").value,
+    tipo: document.getElementById("rTipo").value,
+    responsavel: document.getElementById("rResp").value.trim(),
+    atleta: document.getElementById("rAtleta").value.trim(),
+    categoria: document.getElementById("rCategoria").value.trim(),
+    tema: document.getElementById("rTema").value.trim(),
+    observacoes: document.getElementById("rObs").value.trim()
+  };
+
+  if (!dados.data || !dados.responsavel || !dados.tema || (dados.tipo === "Individual" && !dados.atleta)) {
+    erroEl.textContent = "Preencha data, responsável, tema e, se for individual, o nome do atleta.";
+    erroEl.style.display = "block";
+    return;
+  }
+
+  const eraEdicao = !!editandoId;
+  try {
+    if (editandoId) {
+      await updateDoc(doc(db, COLECAO, editandoId), { ...dados, editadoEm: new Date().toISOString() });
+    } else {
+      const id = doc(collection(db, COLECAO)).id;
+      await setDoc(doc(db, COLECAO, id), { ...dados, autorUid: usuarioAtual.uid, criadoEm: new Date().toISOString() });
+    }
+  } catch (err) {
+    console.error(err);
+    erroEl.textContent = "Não foi possível salvar. Confira se as regras do Firestore foram atualizadas para a coleção planilha_registros. Nada foi perdido.";
+    erroEl.style.display = "block";
+    return;
+  }
+
+  const fora = !passaPeriodo(dados.data);
+  limparFormulario(true);
+  await carregarRegistros();
+  okEl.textContent = (eraEdicao ? "Alterações salvas." : "Registro salvo.") + (fora ? " Ele não aparece na tabela porque está fora do filtro de data: clique em \"Ver todos os meses\"." : "");
+  okEl.style.display = "block";
+};
+
+function limparFormulario(manterResp) {
+  editandoId = null;
+  document.getElementById("tituloForm").textContent = "Novo registro";
+  document.getElementById("avisoEdicao").style.display = "none";
+  document.getElementById("btnSalvar").textContent = "Salvar registro";
+  document.getElementById("btnCancelarEdicao").style.display = "none";
+  ["rAtleta", "rCategoria", "rTema", "rObs"].forEach(i => document.getElementById(i).value = "");
+  if (!manterResp) document.getElementById("rResp").value = "";
+  document.getElementById("rTipo").value = "Individual";
+  document.getElementById("rData").value = hojeStr();
+}
+
+function iniciarEdicao(r) {
+  if (r.autorUid !== usuarioAtual.uid) return;
+  editandoId = r.id;
+  document.getElementById("tituloForm").textContent = "Editar registro";
+  const aviso = document.getElementById("avisoEdicao");
+  aviso.textContent = "Você está editando um registro já salvo. As alterações substituem o anterior.";
+  aviso.style.display = "block";
+  document.getElementById("rData").value = r.data || "";
+  document.getElementById("rTipo").value = r.tipo || "Individual";
+  document.getElementById("rResp").value = r.responsavel || "";
+  document.getElementById("rAtleta").value = r.atleta || "";
+  document.getElementById("rCategoria").value = r.categoria || "";
+  document.getElementById("rTema").value = r.tema || "";
+  document.getElementById("rObs").value = r.observacoes || "";
+  document.getElementById("btnSalvar").textContent = "Salvar alterações";
+  document.getElementById("btnCancelarEdicao").style.display = "inline-block";
+  document.getElementById("erro").style.display = "none";
+  document.getElementById("ok").style.display = "none";
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+window.cancelarEdicao = function () { limparFormulario(true); };
+
+async function excluirRegistro(r) {
+  if (r.autorUid !== usuarioAtual.uid) return;
+  if (!confirm("Excluir este registro da planilha? Essa ação não pode ser desfeita.")) return;
+  try {
+    await deleteDoc(doc(db, COLECAO, r.id));
+  } catch (err) {
+    alert("Não foi possível excluir. Nada foi alterado.");
+    return;
+  }
+  await carregarRegistros();
 }
 
 // ---------- download ----------
-function linhaParaArray(l) {
-  return [fmtData(l.data), l.atleta, l.categoria, l.tipo, l.tema, l.obs, l.enc, l.resp];
+function linhaParaArray(r) {
+  return [fmtData(r.data), r.atleta || "—", r.categoria || "—", r.tipo || "—", r.tema || "—", r.observacoes || "—", r.responsavel || "—"];
 }
 
 function nomeArquivo(ext) {
   const dia = document.getElementById("filtroDia").value;
   const mes = document.getElementById("filtroMes").value;
-  return `registro-atendimentos-${dia || mes || "todos-os-meses"}.${ext}`;
+  const selResp = document.getElementById("filtroResp");
+  const nomeResp = selResp.value ? selResp.selectedOptions[0].textContent : "";
+  const slug = chave(nomeResp).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return `registro-atendimentos-${dia || mes || "todos-os-meses"}${slug ? "-" + slug : ""}.${ext}`;
 }
 
 function baixarBlob(blob, nome) {
@@ -315,8 +436,7 @@ function baixarBlob(blob, nome) {
 window.baixarCSV = function () {
   const aspas = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const linhas = [CABECALHO, ...linhasAtuais.map(linhaParaArray)].map(r => r.map(aspas).join(";"));
-  const conteudo = "\uFEFF" + linhas.join("\r\n");
-  baixarBlob(new Blob([conteudo], { type: "text/csv;charset=utf-8" }), nomeArquivo("csv"));
+  baixarBlob(new Blob(["\uFEFF" + linhas.join("\r\n")], { type: "text/csv;charset=utf-8" }), nomeArquivo("csv"));
 };
 
 window.baixarExcel = function () {
@@ -326,8 +446,8 @@ window.baixarExcel = function () {
   }
   const aoa = [CABECALHO, ...linhasAtuais.map(linhaParaArray)];
   const ws = window.XLSX.utils.aoa_to_sheet(aoa);
-  ws["!cols"] = [{ wch: 12 }, { wch: 30 }, { wch: 14 }, { wch: 18 }, { wch: 30 }, { wch: 60 }, { wch: 40 }, { wch: 18 }];
-  ws["!autofilter"] = { ref: `A1:H${aoa.length}` };
+  ws["!cols"] = [{ wch: 12 }, { wch: 30 }, { wch: 14 }, { wch: 18 }, { wch: 30 }, { wch: 60 }, { wch: 18 }];
+  ws["!autofilter"] = { ref: `A1:G${aoa.length}` };
   const wb = window.XLSX.utils.book_new();
   window.XLSX.utils.book_append_sheet(wb, ws, "Registros");
   const buf = window.XLSX.write(wb, { bookType: "xlsx", type: "array" });
@@ -338,6 +458,9 @@ window.baixarExcel = function () {
 function fmtData(iso) {
   const [y, m, d] = (iso || "").split("-");
   return y ? `${d}/${m}/${y}` : "";
+}
+function chave(txt) {
+  return norm(txt).replace(/\s+/g, " ");
 }
 function norm(txt) {
   return String(txt || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
