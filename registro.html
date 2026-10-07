@@ -10,6 +10,14 @@
   .filtros { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; margin-bottom: 12px; }
   .filtros > div { flex: 1 1 150px; min-width: 140px; }
   .filtros label { margin-top: 0; }
+  /* o campo de mês não estava no estilo do site e ficava fora do tamanho, por cima do vizinho */
+  input[type="month"] {
+    width: 100%; box-sizing: border-box; padding: 9px 10px;
+    border: 1px solid #D9D3C3; border-radius: 8px;
+    font-size: 14px; font-family: inherit; background: #FCFBF7;
+  }
+  .filtros input, .filtros select { box-sizing: border-box; }
+  .filtros > div { min-width: 140px; max-width: 100%; }
   .tabela-wrap { overflow-x: auto; border: 1px solid #DED5C2; border-radius: 10px; margin-top: 10px; }
   table.planilha { border-collapse: collapse; width: 100%; min-width: 980px; font-size: 13px; background: #fff; }
   table.planilha th {
