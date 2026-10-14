@@ -66,6 +66,7 @@
     </div>
 
     <div id="painelGenerico" style="display:none;">
+      <div id="atendimentosLigados" style="display:none; margin-bottom:18px;"></div>
       <div id="formNovoRegistro"></div>
       <div id="historico" style="margin-top:18px;"></div>
       <p id="semRegistros" class="hint" style="display:none;">Nenhum registro nesta aba ainda.</p>
@@ -156,8 +157,37 @@ window.selecionarPrincipal = function (chave) {
     registroEmEdicao = null;
     renderFormularioGenerico();
     carregarHistoricoGenerico();
+    carregarAtendimentosLigados();
   }
 };
+
+// ---- Acompanhamento: lista automática dos atendimentos (só data e profissional) ----
+async function carregarAtendimentosLigados() {
+  const el = document.getElementById("atendimentosLigados");
+  const ehAcomp = tipoAtivo && normalizarNome(tipoAtivo.nome).startsWith("acompanhamento");
+  if (!ehAcomp) { el.style.display = "none"; el.innerHTML = ""; return; }
+  el.style.display = "block";
+  el.innerHTML = '<p class="hint">Carregando atendimentos…</p>';
+  try {
+    const snap = await getDocs(query(collection(db, "atendimentos_meta"), where("atletaId", "==", atletaId)));
+    const itens = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    itens.sort((a, b) => String(b.data || "").localeCompare(String(a.data || "")));
+    if (itens.length === 0) {
+      el.innerHTML = '<h2>Atendimentos registrados</h2><p class="hint">Nenhum atendimento registrado para este atleta ainda. Eles aparecem aqui automaticamente quando forem registrados na aba Atendimentos.</p>';
+      return;
+    }
+    const linhas = itens.map(a => {
+      const meu = a.autorUid === usuarioAtual.uid;
+      return `<div class="entry"><div class="meta">${escHtml(a.data ? formatarData(a.data) : "sem data")} · ${escHtml(a.assinatura || "profissional não informado")}${meu ? ' <span class="pill pill-outline">você</span>' : ""}</div></div>`;
+    }).join("");
+    el.innerHTML = `<h2>Atendimentos registrados</h2>
+      <p class="sub">${itens.length} atendimento(s). Esta lista vem da aba Atendimentos, sem precisar registrar de novo. Aqui aparecem só a data e quem atendeu.</p>
+      ${linhas}`;
+  } catch (err) {
+    console.error(err);
+    el.innerHTML = '<p class="error-msg">Não foi possível carregar a lista de atendimentos agora.</p>';
+  }
+}
 
 window.selecionarParte = function (n) {
   parteAtiva = n;
